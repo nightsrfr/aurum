@@ -138,10 +138,47 @@
     return div.innerHTML;
   }
 
+  // Renders text into an element with any http(s) URLs turned into real,
+  // clickable links — built with DOM nodes (never innerHTML on guest/bot
+  // text) so this stays safe from script injection either direction.
+  function renderWithLinks(el, text) {
+    var re = /(https?:\/\/\S+)/g;
+    var lastIndex = 0;
+    var match;
+    while ((match = re.exec(text)) !== null) {
+      var url = match[0];
+      var trailing = "";
+      while (url.length > 0 && /[.,!?;:'")\]]/.test(url[url.length - 1])) {
+        trailing = url[url.length - 1] + trailing;
+        url = url.slice(0, -1);
+      }
+      if (match.index > lastIndex) {
+        el.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+      var a = document.createElement("a");
+      a.href = url;
+      // Every link the bot currently sends is a payment link, so a short,
+      // friendly label reads much better than a raw 60-character URL in a
+      // chat bubble. Revisit this if other link types get added later.
+      a.textContent = "Pay here →";
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.style.color = "inherit";
+      a.style.fontWeight = "700";
+      a.style.textDecoration = "underline";
+      el.appendChild(a);
+      if (trailing) el.appendChild(document.createTextNode(trailing));
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      el.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+  }
+
   function addMessage(role, text) {
     var el = document.createElement("div");
     el.className = "msg " + role;
-    el.textContent = text;
+    renderWithLinks(el, text);
     messagesEl.appendChild(el);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return el;
