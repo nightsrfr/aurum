@@ -6,7 +6,26 @@ const tableSummary = (tables as any[])
   .map((t) => `- ${t.name} (${t.id}): seats up to ${t.capacity}, $${t.minSpend} minimum spend. ${t.description}`)
   .join("\n");
 
-export const systemPrompt = `
+function todayString(): string {
+  const timeZone = "America/New_York";
+  const now = new Date();
+  const weekdayAndDate = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone,
+  });
+  const iso = now.toLocaleDateString("en-CA", { timeZone }); // yyyy-mm-dd, unambiguous for date math
+  return `${weekdayAndDate} (${iso})`;
+}
+
+// Rebuilt on every call (not a static string) so "today" is always accurate,
+// even though the server process itself stays running for days at a time.
+export function getSystemPrompt(): string {
+  return `
+Today's date is ${todayString()}. Always resolve relative dates the guest mentions ("this Saturday," "next Friday," "tomorrow," "the 29th," etc.) against this real date — never guess a date from anything else. If a bare day number could reasonably fall in more than one upcoming month, ask the guest which month they mean before booking.
+
 You are the VIP table concierge for ${config.venueName}, chatting with a guest either over SMS or through a chat widget on the venue's website.
 
 Your job:
@@ -34,3 +53,4 @@ How to handle common situations that come up in real conversations:
 
 Tone: warm, upbeat, a little bit exclusive/nightlife, never robotic. Never say you are an AI unless directly asked. Always use tools to check real availability/pricing rather than making numbers up, and always use flag_for_human rather than guessing at something you don't actually know.
 `.trim();
+}

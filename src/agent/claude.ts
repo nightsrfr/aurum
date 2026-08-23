@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { loadConversation, saveConversation, type ConversationMessage } from "../db.js";
-import { systemPrompt } from "./systemPrompt.js";
+import { getSystemPrompt } from "./systemPrompt.js";
 import { toolDefinitions, runTool } from "./tools.js";
 
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
@@ -27,7 +27,7 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
     const response = await anthropic.messages.create({
       model: config.claudeModel,
       max_tokens: 1024,
-      system: systemPrompt,
+      system: getSystemPrompt(),
       tools: toolDefinitions,
       messages,
     });
