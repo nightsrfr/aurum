@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sample Payment Link — VIP Table Booking Pilot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+  h1 { font-size: 22px; }
+  .updated { color: #666; font-size: 14px; margin-bottom: 24px; }
+  .note { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 16px; font-size: 14px; color: #444; margin-bottom: 24px; }
+  .summary { border: 1px solid #ddd; border-radius: 10px; padding: 20px; }
+  .summary h2 { font-size: 16px; margin: 0 0 14px; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 15px; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: #666; }
+  .total { font-weight: bold; font-size: 17px; margin-top: 10px; }
+  .explainer { margin-top: 24px; font-size: 14px; color: #555; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 13px; color: #666; }
+  a { color: #0b5fff; }
+</style>
+</head>
+<body>
+  <h1>Sample Payment Link</h1>
+  <p class="updated">VIP Table Booking Pilot</p>
+
+  <div class="note">This is a sample of the reservation summary a guest sees on the secure link we text after confirming a VIP table booking. It is provided for registration and review purposes and is not a live checkout.</div>
+
+  <div class="summary">
+    <h2>Reservation Summary</h2>
+    <div class="row"><span class="label">Guest</span><span>[Name]</span></div>
+    <div class="row"><span class="label">Date</span><span>[Date]</span></div>
+    <div class="row"><span class="label">Party size</span><span>[Size]</span></div>
+    <div class="row"><span class="label">Table</span><span>[Table Name]</span></div>
+    <div class="row total"><span class="label">Amount due</span><span>$[Amount]</span></div>
+  </div>
+
+  <p class="explainer">In production, this link opens a Stripe Checkout page where the guest securely enters payment details to complete their reservation. The amount is credited toward their table that night.</p>
+
+  <footer>
+    VIP Table Booking Pilot — operated by Diton Pashaj (sole proprietor). See our <a href="./privacy.html">Privacy Policy</a> and <a href="./terms.html">Terms and Conditions</a>.
+  </footer>
+</body>
+</html>
