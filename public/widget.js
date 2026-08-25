@@ -19,6 +19,12 @@
  * dropped into any website regardless of what framework (or none) that
  * site uses. All markup/styles live inside a Shadow DOM so they can't
  * collide with the host site's CSS.
+ *
+ * The chat session and open/closed state are both persisted (session id in
+ * localStorage, conversation history on the server), so as long as every
+ * page on the site loads this same script from the same origin — including
+ * a secondary page like a menu, or a payment/confirmation page — the guest
+ * sees one continuous conversation instead of starting over on every click.
  */
 (function () {
   var scriptEl = document.currentScript;
@@ -52,6 +58,27 @@
     }
   }
   var sessionId = getSessionId();
+
+  // Whether the guest had the chat panel open is also persisted, purely so
+  // that navigating to another page on the same site (menu, payment,
+  // confirmation) reopens the panel automatically instead of guests having
+  // to re-find and re-click the launcher every time.
+  var OPEN_KEY = "nightsrfr_widget_open";
+  function isPanelOpenStored() {
+    try {
+      return window.localStorage.getItem(OPEN_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+  function setPanelOpenStored(isOpen) {
+    try {
+      if (isOpen) window.localStorage.setItem(OPEN_KEY, "1");
+      else window.localStorage.removeItem(OPEN_KEY);
+    } catch (e) {
+      // Ignore — worst case the panel just doesn't auto-reopen on the next page.
+    }
+  }
 
   // ---- Build host element + shadow root ----------------------------------
   var host = document.createElement("div");
@@ -138,6 +165,15 @@
     return div.innerHTML;
   }
 
+  // Picks the button label for a link the bot sends, based on what kind of
+  // link it is. Everything the bot currently sends is either a payment link
+  // or the bottle-menu link, so this only needs to tell those two apart —
+  // add more patterns here if new link types get added later.
+  function labelForLink(url) {
+    if (/\/menu(\.html)?(\?|#|$)/i.test(url)) return "View Menu →";
+    return "Pay here →";
+  }
+
   // Renders text into an element with any http(s) URLs turned into real,
   // clickable links — built with DOM nodes (never innerHTML on guest/bot
   // text) so this stays safe from script injection either direction.
@@ -157,10 +193,7 @@
       }
       var a = document.createElement("a");
       a.href = url;
-      // Every link the bot currently sends is a payment link, so a short,
-      // friendly label reads much better than a raw 60-character URL in a
-      // chat bubble. Revisit this if other link types get added later.
-      a.textContent = "Pay here →";
+      a.textContent = labelForLink(url);
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       a.style.color = "inherit";
@@ -184,20 +217,27 @@
     return el;
   }
 
+  // Becomes true once the panel has real content in it — either restored
+  // history or the one-time greeting — so we never show the greeting twice.
   var opened = false;
+
+  function showGreeting() {
+    opened = true;
+    addMessage(
+      "bot",
+      "Hey! Want to grab a VIP table? Tell me the date and party size you're thinking and I'll take it from there."
+    );
+  }
+
   function openPanel() {
     panel.classList.remove("hidden");
-    if (!opened) {
-      opened = true;
-      addMessage(
-        "bot",
-        "Hey! Want to grab a VIP table? Tell me the date and party size you're thinking and I'll take it from there."
-      );
-      input.focus();
-    }
+    setPanelOpenStored(true);
+    if (!opened) showGreeting();
+    input.focus();
   }
   function closePanel() {
     panel.classList.add("hidden");
+    setPanelOpenStored(false);
   }
 
   launcher.addEventListener("click", function () {
@@ -243,4 +283,41 @@
   input.addEventListener("keydown", function (e) {
     if (e.key === "Enter") send();
   });
+
+  // ---- Restore conversation across page loads -----------------------------
+  // Runs once on every page this widget is embedded on. If this browser
+  // already has a conversation for this session (e.g. the guest started
+  // chatting on the homepage and then clicked through to the menu page, or
+  // followed a payment link that landed on our own confirmation page), we
+  // repaint that history here instead of starting over. If the panel was
+  // left open, it's reopened automatically too.
+  function restoreFromServer() {
+    fetch(API_BASE + "/api/chat/history?sessionId=" + encodeURIComponent(sessionId))
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (data) {
+        var messages = (data && data.messages) || [];
+        if (messages.length > 0) {
+          opened = true;
+          messages.forEach(function (m) {
+            addMessage(m.role === "user" ? "user" : "bot", m.text);
+          });
+        }
+        if (isPanelOpenStored()) {
+          panel.classList.remove("hidden");
+          if (!opened) showGreeting();
+        }
+      })
+      .catch(function () {
+        // If the history fetch fails (offline, cold start, etc.), still
+        // honor a previously-open panel rather than leaving the guest
+        // stranded — they'll just see a fresh greeting instead of history.
+        if (isPanelOpenStored()) {
+          panel.classList.remove("hidden");
+          if (!opened) showGreeting();
+        }
+      });
+  }
+  restoreFromServer();
 })();
