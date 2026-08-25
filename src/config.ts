@@ -30,4 +30,8 @@ export const config = {
 
   venueName: env("VENUE_NAME", "The Venue"),
   maxTablesPerTierPerNight: Number(env("MAX_TABLES_PER_TIER_PER_NIGHT", "3")),
+
+  // Optional link to a bottle-service/VIP menu page. Empty string means
+  // "no menu page yet" — the bot falls back to describing pricing verbally.
+  menuUrl: env("MENU_URL", ""),
 };
