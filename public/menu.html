@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AURUM — Bottle Service Menu</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0a0a0d;
+    --panel: #141317;
+    --panel-2: #1b1a1f;
+    --text: #f2f0ee;
+    --muted: #a7a3ab;
+    --accent: #c81845;
+    --accent-2: #e2b25c;
+    --border: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- Nav ---- */
+  header.nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 500;
+    background: rgba(10,10,13,0.7);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    max-width: 1080px; margin: 0 auto; padding: 18px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo {
+    font-size: 20px; font-weight: 800; letter-spacing: 6px;
+    color: var(--text); text-decoration: none;
+  }
+  .nav-links { display: flex; align-items: center; gap: 28px; }
+  .nav-links a { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-links a.active { color: var(--accent-2); }
+  .btn {
+    display: inline-block; border: none; cursor: pointer;
+    font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 12px 24px; border-radius: 3px; font-weight: 700;
+    background: var(--accent); color: #fff; text-decoration: none;
+    transition: filter 0.15s ease;
+  }
+  .btn:hover { filter: brightness(1.12); }
+  .btn.ghost {
+    background: transparent; border: 1px solid rgba(255,255,255,0.3); color: var(--text);
+  }
+
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    padding: 160px 24px 80px;
+    text-align: center;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(200,24,69,0.22), transparent 45%),
+      radial-gradient(circle at 80% 10%, rgba(226,178,92,0.15), transparent 40%),
+      #08080b;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    font-size: 12px; letter-spacing: 4px; text-transform: uppercase; color: var(--accent-2);
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-size: clamp(36px, 7vw, 64px); font-weight: 800; letter-spacing: 4px;
+    margin-bottom: 16px;
+  }
+  .hero p.sub {
+    font-size: 16px; color: var(--muted); max-width: 520px; margin: 0 auto;
+  }
+
+  /* ---- Sections ---- */
+  section { padding: 80px 0; }
+  .section-head { text-align: center; max-width: 560px; margin: 0 auto 48px; }
+  .section-head h2 { font-size: 28px; font-weight: 800; letter-spacing: 2px; margin-bottom: 12px; }
+  .section-head p { color: var(--muted); font-size: 14.5px; }
+
+  /* ---- Spirits categories ---- */
+  .categories {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;
+  }
+  .cat-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 26px 28px;
+  }
+  .cat-card h3 {
+    font-size: 13px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent-2);
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+  }
+  .cat-card ul { list-style: none; }
+  .cat-card li {
+    display: flex; justify-content: space-between; gap: 12px;
+    font-size: 14.5px; padding: 7px 0; color: var(--text);
+  }
+  .cat-card li span.price { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ---- Packages ---- */
+  .packages-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+  }
+  .package-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 28px 24px; display: flex; flex-direction: column;
+    position: relative;
+  }
+  .package-card.featured { border-color: var(--accent-2); }
+  .package-card .featured-tag {
+    position: absolute; top: -12px; left: 24px;
+    background: var(--accent-2); color: #1a1400; font-size: 10.5px; font-weight: 800;
+    letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 10px; border-radius: 3px;
+  }
+  .package-card h3 { font-size: 20px; margin-bottom: 8px; }
+  .package-card .price { font-size: 28px; font-weight: 800; color: var(--accent-2); margin-bottom: 16px; }
+  .package-card ul { list-style: none; margin-bottom: 22px; flex: 1; }
+  .package-card li {
+    font-size: 13.5px; color: var(--muted); padding: 5px 0; padding-left: 16px; position: relative;
+  }
+  .package-card li::before {
+    content: "—"; position: absolute; left: 0; color: var(--accent);
+  }
+
+  /* ---- Mixers ---- */
+  .mixers-band {
+    background: var(--panel-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .mixers-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; text-align: center;
+  }
+  .mixers-grid .item h4 { font-size: 15px; margin-bottom: 6px; }
+  .mixers-grid .item p { color: var(--muted); font-size: 13.5px; }
+
+  .service-note {
+    text-align: center; color: var(--muted); font-size: 13px; margin-top: 40px;
+    letter-spacing: 0.5px;
+  }
+
+  .cta-band {
+    text-align: center; padding: 90px 24px;
+  }
+  .cta-band h2 { font-size: 28px; margin-bottom: 14px; letter-spacing: 1px; }
+  .cta-band p { color: var(--muted); margin-bottom: 28px; }
+
+  footer {
+    padding: 48px 0 32px; text-align: center; color: var(--muted); font-size: 13px;
+    border-top: 1px solid var(--border);
+  }
+  footer .logo { display: block; margin-bottom: 10px; }
+  footer .disclaimer {
+    max-width: 520px; margin: 24px auto 0; font-size: 12px; line-height: 1.6;
+    color: #6c6870; border-top: 1px solid var(--border); padding-top: 20px;
+  }
+
+  @media (max-width: 760px) {
+    .nav-links a:not(.btn) { display: none; }
+    .categories, .packages-grid, .mixers-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="logo" href="venue-demo.html">AURUM</a>
+      <div class="nav-links">
+        <a href="venue-demo.html#about">About</a>
+        <a href="venue-demo.html#tables">VIP Tables</a>
+        <a href="menu.html" class="active">Menu</a>
+        <a href="venue-demo.html#visit">Visit</a>
+        <a class="btn" href="#" onclick="openBookingWidget(); return false;">Reserve</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="eyebrow">Late Night Service</div>
+    <h1>The Bottle Menu</h1>
+    <p class="sub">Full bottle service for every VIP table, poured tableside by your dedicated host. Ask your concierge about anything not listed here.</p>
+  </section>
+
+  <section id="spirits">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">By The Bottle</div>
+        <h2>Spirits</h2>
+        <p>A curated selection across every category. Pricing reflects table service and is included toward your table's minimum spend.</p>
+      </div>
+      <div class="categories">
+        <div class="cat-card">
+          <h3>Tequila</h3>
+          <ul>
+            <li><span>Clase Azul Reposado</span><span class="price">$425</span></li>
+            <li><span>Don Julio 1942</span><span class="price">$425</span></li>
+            <li><span>Don Julio Reposado</span><span class="price">$350</span></li>
+            <li><span>Casamigos Reposado</span><span class="price">$350</span></li>
+            <li><span>Patrón Silver</span><span class="price">$325</span></li>
+            <li><span>Casamigos Blanco</span><span class="price">$300</span></li>
+          </ul>
+        </div>
+        <div class="cat-card">
+          <h3>Whiskey</h3>
+          <ul>
+            <li><span>Johnnie Walker Black</span><span class="price">$350</span></li>
+            <li><span>Woodford Reserve</span><span class="price">$350</span></li>
+            <li><span>Maker's Mark</span><span class="price">$300</span></li>
+            <li><span>Jameson</span><span class="price">$275</span></li>
+            <li><span>Jack Daniel's</span><span class="price">$275</span></li>
+          </ul>
+        </div>
+        <div class="cat-card">
+          <h3>Vodka</h3>
+          <ul>
+            <li><span>Grey Goose</span><span class="price">$325</span></li>
+            <li><span>Tito's</span><span class="price">$300</span></li>
+          </ul>
+        </div>
+        <div class="cat-card">
+          <h3>Rum</h3>
+          <ul>
+            <li><span>Ron Zacapa 23</span><span class="price">$300</span></li>
+            <li><span>Diplomático</span><span class="price">$300</span></li>
+            <li><span>Santa Teresa 1796</span><span class="price">$300</span></li>
+            <li><span>Bacardí Silver</span><span class="price">$275</span></li>
+          </ul>
+        </div>
+        <div class="cat-card">
+          <h3>Gin &amp; Mezcal</h3>
+          <ul>
+            <li><span>Del Maguey Mezcal</span><span class="price">$350</span></li>
+            <li><span>Ilegal Mezcal</span><span class="price">$300</span></li>
+            <li><span>Hendrick's Gin</span><span class="price">$300</span></li>
+            <li><span>Tanqueray Gin</span><span class="price">$275</span></li>
+          </ul>
+        </div>
+        <div class="cat-card">
+          <h3>Champagne</h3>
+          <ul>
+            <li><span>Dom Pérignon Brut</span><span class="price">$700</span></li>
+            <li><span>Veuve Clicquot Brut</span><span class="price">$275</span></li>
+            <li><span>Moët &amp; Chandon Brut</span><span class="price">$275</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="service-note">A 23% service charge is added to all bottle service checks.</div>
+    </div>
+  </section>
+
+  <section id="packages" style="background:var(--panel);">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Table Packages</div>
+        <h2>VIP Experiences</h2>
+        <p>Pre-built packages for tables that want it simple. Every package can be customized with your host.</p>
+      </div>
+      <div class="packages-grid">
+        <div class="package-card">
+          <h3>The Night Starter</h3>
+          <div class="price">$450</div>
+          <ul>
+            <li>1 bottle Ron Zacapa 23</li>
+            <li>1 Patrón Silver mini pour</li>
+            <li>1 beer bucket</li>
+            <li>1 energy drink bucket</li>
+            <li>1 water bucket</li>
+          </ul>
+          <a class="btn ghost" href="#" onclick="openBookingWidget(); return false;">Reserve With This Package</a>
+        </div>
+        <div class="package-card featured">
+          <div class="featured-tag">Most Popular</div>
+          <h3>Gold Standard</h3>
+          <div class="price">$600</div>
+          <ul>
+            <li>1 bottle Patrón Silver</li>
+            <li>1 bottle Veuve Clicquot Brut</li>
+            <li>1 beer bucket</li>
+            <li>1 energy drink bucket</li>
+          </ul>
+          <a class="btn" href="#" onclick="openBookingWidget(); return false;">Reserve With This Package</a>
+        </div>
+        <div class="package-card">
+          <h3>The Crown</h3>
+          <div class="price">$950</div>
+          <ul>
+            <li>1 bottle Clase Azul Reposado</li>
+            <li>1 bottle Grey Goose</li>
+            <li>1 bottle Veuve Clicquot Brut</li>
+            <li>1 beer bucket</li>
+            <li>1 water bucket</li>
+          </ul>
+          <a class="btn ghost" href="#" onclick="openBookingWidget(); return false;">Reserve With This Package</a>
+        </div>
+      </div>
+      <div class="service-note">A 23% service charge is added to all bottle service checks.</div>
+    </div>
+  </section>
+
+  <section class="mixers-band">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Add To Any Table</div>
+        <h2>Buckets &amp; Mixers</h2>
+      </div>
+      <div class="mixers-grid">
+        <div class="item"><h4>Modelo (5)</h4><p>$30</p></div>
+        <div class="item"><h4>Corona (5)</h4><p>$30</p></div>
+        <div class="item"><h4>Red Bull (6)</h4><p>$30</p></div>
+        <div class="item"><h4>Fiji Water</h4><p>$30</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <h2>Ready for your table?</h2>
+    <p>Chat with our concierge to check availability and pick your table for the night.</p>
+    <a class="btn" href="#" onclick="openBookingWidget(); return false;">Reserve a Table</a>
+  </section>
+
+  <footer>
+    <a class="logo" href="venue-demo.html">AURUM</a>
+    <div>&copy; 2026 AURUM. All rights reserved.</div>
+    <div class="disclaimer">
+      This is a demo page for testing purposes only — AURUM is a fictional venue and this is not a real business. Menu items and pricing shown here are for demonstration purposes only.
+    </div>
+  </footer>
+
+  <script>
+    // Loads the real widget, auto-pointed at whichever server hosts this page.
+    (function () {
+      var s = document.createElement("script");
+      s.src = window.location.origin + "/widget.js";
+      s.setAttribute("data-api-base", window.location.origin);
+      s.setAttribute("data-venue-name", "AURUM");
+      s.setAttribute("data-accent-color", "#c81845");
+      // Once you have the new Twilio number, uncomment the line below:
+      // s.setAttribute("data-phone", "+1XXXXXXXXXX");
+      document.body.appendChild(s);
+    })();
+
+    // Lets the page's own "Reserve" buttons open the widget's chat panel
+    // directly, instead of guests having to find the launcher themselves.
+    function openBookingWidget() {
+      var tries = 0;
+      var tryOpen = function () {
+        var host = document.getElementById("nightsrfr-widget-host");
+        var launcher = host && host.shadowRoot && host.shadowRoot.querySelector(".launcher");
+        if (launcher) {
+          var panel = host.shadowRoot.querySelector(".panel");
+          if (panel && panel.classList.contains("hidden")) launcher.click();
+        } else if (tries < 20) {
+          tries++;
+          setTimeout(tryOpen, 100);
+        }
+      };
+      tryOpen();
+    }
+  </script>
+</body>
+</html>
