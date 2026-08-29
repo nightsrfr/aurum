@@ -495,7 +495,7 @@
     var isWeb = decodeURIComponent(encodedId).indexOf("web:") === 0;
     document.getElementById("convReplyRow").hidden = false;
     document.getElementById("convReplyNote").textContent = isWeb
-      ? "Website widget conversation — delivered instantly if the guest has the chat open right now, otherwise it'll appear next time they open or reload it."
+      ? "Website widget conversation — delivered instantly if the guest still has this chat open. Once they close that tab, the chat has ended and a new visit starts a fresh conversation, so there's no later moment for this to \"arrive.\""
       : "Sent live via text message to the guest's phone.";
     api("/admin/api/conversations/" + encodedId).then(function (data) {
       renderTranscript(data.messages);
@@ -538,7 +538,7 @@
         ? "Sent live via text message to the guest's phone."
         : data.delivered === "web-live"
         ? "Delivered instantly — the guest's chat window is open right now."
-        : "Saved — the guest doesn't currently have the chat open, so this will appear next time they open or reload it.";
+        : "Saved, but this guest's chat tab isn't open right now. Since closing the tab ends that chat, they likely won't see this reply — it'll stay here in the conversation history either way.";
       showToast("Message sent");
       loadConversations(false);
     }).catch(function () {
