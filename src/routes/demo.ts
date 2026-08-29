@@ -20,7 +20,7 @@ export const demoRouter = Router();
 // their payment link in a new tab lands on a page where the chat is still
 // right there, with full history, instead of needing to close the tab and
 // go back to find it.
-function widgetLoaderScript(): string {
+export function widgetLoaderScript(): string {
   return `
     <script>
       (function () {
