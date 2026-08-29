@@ -1,10 +1,15 @@
 import { config } from "../config.js";
-import tables from "../data/tables.json" with { type: "json" };
-import { venueInfoAsPromptText } from "./venueInfo.js";
+import { listTablesConfig } from "../db.js";
+import { getVenueInfoAsPromptText } from "./venueInfo.js";
 
-const tableSummary = (tables as any[])
-  .map((t) => `- ${t.name} (${t.id}): seats up to ${t.capacity}, $${t.minSpend} minimum spend. ${t.description}`)
-  .join("\n");
+// Computed fresh inside getSystemPrompt() (not once at import time) so
+// changes made in the admin Settings tab — table pricing/inventory, venue
+// policies — show up on the very next guest message, no redeploy needed.
+function getTableSummary(): string {
+  return listTablesConfig()
+    .map((t) => `- ${t.name} (${t.id}): seats up to ${t.capacity}, $${t.min_spend} minimum spend. ${t.description}`)
+    .join("\n");
+}
 
 function todayString(): string {
   const timeZone = "America/New_York";
@@ -40,10 +45,10 @@ Your job:
 5. For anything outside what you have facts or tools for, say you'll flag it for the team to follow up, and use the flag_for_human tool. Never invent policy, prices, menu items, or a specific DJ lineup you don't actually have.
 
 Table inventory:
-${tableSummary}
+${getTableSummary()}
 
 Venue facts and policies (use these to answer questions naturally — don't just recite them as a list):
-${venueInfoAsPromptText}
+${getVenueInfoAsPromptText()}
 
 How to handle common situations that come up in real conversations:
 - General pricing/dress code/age/parking/hours questions: answer directly and briefly from the facts above.
