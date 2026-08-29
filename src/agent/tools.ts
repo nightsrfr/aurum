@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
-import tables from "../data/tables.json" with { type: "json" };
 import { config } from "../config.js";
-import { countActiveBookings, createBooking, updateBooking } from "../db.js";
+import { countActiveBookings, createBooking, createFlag, listTablesConfig, updateBooking } from "../db.js";
 import { createPaymentLink } from "../services/stripe.js";
 
 type Table = { id: string; name: string; capacity: number; minSpend: number; description: string };
-const TABLES = tables as Table[];
+
+// Read fresh from the DB on every call (not cached) so a table edited or
+// added in the admin Settings tab is usable immediately.
+function getTables(): Table[] {
+  return listTablesConfig().map((t) => ({
+    id: t.id,
+    name: t.name,
+    capacity: t.capacity,
+    minSpend: t.min_spend,
+    description: t.description,
+  }));
+}
 
 export const toolDefinitions: Anthropic.Tool[] = [
   {
@@ -62,11 +72,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 export async function runTool(name: string, input: any): Promise<any> {
   switch (name) {
     case "get_table_options":
-      return { tables: TABLES };
+      return { tables: getTables() };
 
     case "check_availability": {
       const { date, party_size } = input;
-      const results = TABLES.map((t) => {
+      const results = getTables().map((t) => {
         const booked = countActiveBookings(date, t.id);
         const remaining = Math.max(config.maxTablesPerTierPerNight - booked, 0);
         return {
@@ -83,7 +93,7 @@ export async function runTool(name: string, input: any): Promise<any> {
 
     case "start_booking": {
       const { date, party_size, table_id, guest_name, phone } = input;
-      const table = TABLES.find((t) => t.id === table_id);
+      const table = getTables().find((t) => t.id === table_id);
       if (!table) {
         return { success: false, reason: "unknown_table_id" };
       }
@@ -132,6 +142,7 @@ export async function runTool(name: string, input: any): Promise<any> {
     }
 
     case "flag_for_human": {
+      createFlag(input.phone, input.summary);
       console.log(`\n[NEEDS HUMAN] ${input.phone}: ${input.summary}\n`);
       return { success: true, flagged: true };
     }
