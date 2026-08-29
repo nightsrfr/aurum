@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { smsRouter } from "./routes/sms.js";
 import { stripeWebhookRouter } from "./routes/stripeWebhook.js";
 import { demoRouter } from "./routes/demo.js";
+import { checkoutRouter } from "./routes/checkout.js";
 import { chatRouter } from "./routes/chat.js";
 import { adminRouter } from "./routes/admin.js";
 
@@ -29,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(smsRouter);
 app.use(demoRouter);
+app.use(checkoutRouter);
 app.use(chatRouter);
 app.use(adminRouter);
 
