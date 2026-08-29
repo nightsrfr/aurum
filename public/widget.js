@@ -20,11 +20,16 @@
  * site uses. All markup/styles live inside a Shadow DOM so they can't
  * collide with the host site's CSS.
  *
- * The chat session and open/closed state are both persisted (session id in
- * localStorage, conversation history on the server), so as long as every
- * page on the site loads this same script from the same origin — including
- * a secondary page like a menu, or a payment/confirmation page — the guest
- * sees one continuous conversation instead of starting over on every click.
+ * Session lifetime: the chat session id lives in sessionStorage, not
+ * localStorage — so it lasts for as long as this tab stays open (surviving
+ * normal page navigation within it), but closing the tab ends that chat for
+ * good. Reopening the site later starts a brand new conversation; the old
+ * one is untouched and still fully visible in the admin console, it's just
+ * not resumed. The one deliberate exception: a link the bot itself sends
+ * (the payment page, the menu page) carries the current session id forward
+ * as a URL parameter, so clicking through to one of those — even though it
+ * opens in a new tab — still lands in the same conversation, since that's
+ * the guest continuing this chat on purpose rather than starting a new visit.
  */
 (function () {
   var scriptEl = document.currentScript;
@@ -41,40 +46,83 @@
   }
 
   var SESSION_KEY = "nightsrfr_widget_session_id";
+  // A link the bot sends (payment/menu page) puts the session id here so the
+  // new tab it opens in can pick up the SAME conversation on purpose, rather
+  // than being treated as a fresh visit. See getSessionId() below.
+  var SESSION_PARAM = "nsrfr_chat";
+
+  function freshSessionId() {
+    return window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : "sess-" + Math.random().toString(36).slice(2) + Date.now();
+  }
+
   function getSessionId() {
+    // 1. Continuing an existing conversation via a link the bot sent —
+    //    honor that even though it's a new tab, and scrub the id out of the
+    //    visible URL so it doesn't linger if the guest bookmarks/shares it.
     try {
-      var existing = window.localStorage.getItem(SESSION_KEY);
+      var url = new URL(window.location.href);
+      var fromLink = url.searchParams.get(SESSION_PARAM);
+      if (fromLink) {
+        window.sessionStorage.setItem(SESSION_KEY, fromLink);
+        url.searchParams.delete(SESSION_PARAM);
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        return fromLink;
+      }
+    } catch (e) {
+      // URL/history APIs unavailable for some reason — fall through.
+    }
+
+    // 2. This tab's own session. sessionStorage (not localStorage) is what
+    //    makes closing the tab end the chat: it survives page navigation
+    //    within this tab, but the browser wipes it the moment the tab
+    //    closes, so a later visit in a new tab starts a fresh conversation.
+    try {
+      var existing = window.sessionStorage.getItem(SESSION_KEY);
       if (existing) return existing;
-      var fresh =
-        window.crypto && window.crypto.randomUUID
-          ? window.crypto.randomUUID()
-          : "sess-" + Math.random().toString(36).slice(2) + Date.now();
-      window.localStorage.setItem(SESSION_KEY, fresh);
+      var fresh = freshSessionId();
+      window.sessionStorage.setItem(SESSION_KEY, fresh);
       return fresh;
     } catch (e) {
-      // localStorage unavailable (private mode, etc.) — fall back to an
+      // sessionStorage unavailable (private mode, etc.) — fall back to an
       // in-memory id that lasts for this page view only.
-      return "sess-" + Math.random().toString(36).slice(2) + Date.now();
+      return freshSessionId();
     }
   }
   var sessionId = getSessionId();
 
+  // Appends this tab's session id onto a same-origin link before rendering
+  // it as clickable — see the SESSION_PARAM comment above. Left untouched
+  // for any link that isn't pointed at our own backend.
+  function withSessionParam(url) {
+    try {
+      var u = new URL(url, window.location.href);
+      if (u.origin === new URL(API_BASE).origin) {
+        u.searchParams.set(SESSION_PARAM, sessionId);
+      }
+      return u.toString();
+    } catch (e) {
+      return url;
+    }
+  }
+
   // Whether the guest had the chat panel open is also persisted, purely so
-  // that navigating to another page on the same site (menu, payment,
-  // confirmation) reopens the panel automatically instead of guests having
-  // to re-find and re-click the launcher every time.
+  // that navigating to another page on the same site within this same tab
+  // (menu, payment, confirmation) reopens the panel automatically instead
+  // of guests having to re-find and re-click the launcher every time.
   var OPEN_KEY = "nightsrfr_widget_open";
   function isPanelOpenStored() {
     try {
-      return window.localStorage.getItem(OPEN_KEY) === "1";
+      return window.sessionStorage.getItem(OPEN_KEY) === "1";
     } catch (e) {
       return false;
     }
   }
   function setPanelOpenStored(isOpen) {
     try {
-      if (isOpen) window.localStorage.setItem(OPEN_KEY, "1");
-      else window.localStorage.removeItem(OPEN_KEY);
+      if (isOpen) window.sessionStorage.setItem(OPEN_KEY, "1");
+      else window.sessionStorage.removeItem(OPEN_KEY);
     } catch (e) {
       // Ignore — worst case the panel just doesn't auto-reopen on the next page.
     }
@@ -194,7 +242,7 @@
         el.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
       }
       var a = document.createElement("a");
-      a.href = url;
+      a.href = withSessionParam(url);
       a.textContent = labelForLink(url);
       a.target = "_blank";
       a.rel = "noopener noreferrer";
