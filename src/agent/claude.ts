@@ -53,7 +53,7 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
         block.name === "start_booking" || block.name === "flag_for_human"
           ? { ...(block.input as any), phone }
           : block.input;
-      const result = await runTool(block.name, input);
+      const result = await runTool(block.name, input, phone);
       toolResults.push({
         type: "tool_result",
         tool_use_id: block.id,
