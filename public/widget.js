@@ -95,6 +95,8 @@
     "padding:14px 20px;font-size:15px;font-weight:600;cursor:pointer;" +
     "box-shadow:0 8px 24px rgba(0,0,0,0.25);display:flex;align-items:center;gap:8px;}" +
     ".launcher:hover{filter:brightness(1.08);}" +
+    ".launcher.hasUnread::after{content:'';position:absolute;top:-2px;right:-2px;" +
+    "width:12px;height:12px;border-radius:50%;background:#ff3b30;border:2px solid #fff;}" +
     ".panel{position:fixed;bottom:88px;right:20px;width:340px;max-width:calc(100vw - 32px);" +
     "height:460px;max-height:calc(100vh - 120px);background:#fff;border-radius:14px;" +
     "box-shadow:0 16px 48px rgba(0,0,0,0.3);display:flex;flex-direction:column;overflow:hidden;" +
@@ -231,6 +233,7 @@
 
   function openPanel() {
     panel.classList.remove("hidden");
+    launcher.classList.remove("hasUnread");
     setPanelOpenStored(true);
     if (!opened) showGreeting();
     input.focus();
@@ -320,4 +323,37 @@
       });
   }
   restoreFromServer();
+
+  // ---- Live staff messages -------------------------------------------------
+  // Keeps a Server-Sent-Events connection open for as long as this page is
+  // loaded. The only thing that ever arrives here is a staff "jump in"
+  // reply sent from the admin console — normal bot replies already arrive
+  // as the direct response to this widget's own /api/chat call, so they
+  // don't go through this. This is what makes a staff reply show up in an
+  // already-open chat window immediately instead of only on next reload.
+  // If EventSource isn't supported, or the connection drops, the guest
+  // still gets the message the next time this page loads (restoreFromServer
+  // above), so this is a pure enhancement, not a dependency.
+  if (window.EventSource) {
+    var stream = new EventSource(
+      API_BASE + "/api/chat/stream?sessionId=" + encodeURIComponent(sessionId)
+    );
+    stream.onmessage = function (evt) {
+      if (!evt.data) return;
+      var msg;
+      try {
+        msg = JSON.parse(evt.data);
+      } catch (e) {
+        return;
+      }
+      if (!msg || typeof msg.text !== "string") return;
+      opened = true;
+      addMessage("bot", msg.text);
+      if (panel.classList.contains("hidden")) {
+        launcher.classList.add("hasUnread");
+      }
+    };
+    // EventSource reconnects automatically on its own after a dropped
+    // connection (browser-native behavior) — nothing else needed here.
+  }
 })();
