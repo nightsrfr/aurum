@@ -449,7 +449,8 @@
   // Conversations
   // ---------------------------------------------------------------------
   var activeConvId = null;
-  function loadConversations() {
+  function loadConversations(reopenActive) {
+    if (reopenActive === undefined) reopenActive = true;
     api("/admin/api/conversations").then(function (data) {
       var list = document.getElementById("convList");
       if (!data.conversations.length) {
@@ -475,10 +476,17 @@
         });
       });
 
-      // Re-open whichever conversation was selected before refresh, if still present.
+      // Re-open whichever conversation was selected before refresh, if still
+      // present — but not right after we just sent a staff reply ourselves
+      // (reopenActive: false), since that would re-fetch and overwrite the
+      // precise "delivered instantly" / "saved" note we just set with the
+      // generic pre-send one.
       if (activeConvId) {
         var match = list.querySelector('.conv-row[data-id="' + activeConvId + '"]');
-        if (match) { match.classList.add("active"); openConversation(activeConvId); }
+        if (match) {
+          match.classList.add("active");
+          if (reopenActive) openConversation(activeConvId);
+        }
       }
     });
   }
@@ -487,7 +495,7 @@
     var isWeb = decodeURIComponent(encodedId).indexOf("web:") === 0;
     document.getElementById("convReplyRow").hidden = false;
     document.getElementById("convReplyNote").textContent = isWeb
-      ? "Website widget conversation — a staff reply here only appears once the guest reloads or reopens the chat."
+      ? "Website widget conversation — delivered instantly if the guest has the chat open right now, otherwise it'll appear next time they open or reload it."
       : "Sent live via text message to the guest's phone.";
     api("/admin/api/conversations/" + encodedId).then(function (data) {
       renderTranscript(data.messages);
@@ -528,9 +536,11 @@
       renderTranscript(data.messages);
       note.textContent = data.delivered === "sms"
         ? "Sent live via text message to the guest's phone."
-        : "Website widget conversation — a staff reply here only appears once the guest reloads or reopens the chat.";
+        : data.delivered === "web-live"
+        ? "Delivered instantly — the guest's chat window is open right now."
+        : "Saved — the guest doesn't currently have the chat open, so this will appear next time they open or reload it.";
       showToast("Message sent");
-      loadConversations();
+      loadConversations(false);
     }).catch(function () {
       btn.disabled = false;
       note.textContent = "Failed to send — check your connection and try again.";
