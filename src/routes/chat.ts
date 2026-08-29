@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { runAgent } from "../agent/claude.js";
-import { loadConversation } from "../db.js";
+import { getConversationTranscript } from "../db.js";
 
 export const chatRouter = Router();
 
@@ -51,32 +51,5 @@ chatRouter.get("/api/chat/history", (req, res) => {
   }
 
   const channelId = `web:${sessionId}`;
-  const history = loadConversation(channelId);
-
-  const messages = history
-    .map((m) => {
-      if (m.role === "user") {
-        // A real guest message is a plain string. Tool-result turns are
-        // arrays of tool_result blocks fed back to Claude — not something
-        // the widget should ever display.
-        if (typeof m.content === "string" && m.content.trim()) {
-          return { role: "user" as const, text: m.content };
-        }
-        return null;
-      }
-      if (m.role === "assistant" && Array.isArray(m.content)) {
-        const text = (m.content as any[])
-          .filter((block) => block?.type === "text" && typeof block.text === "string")
-          .map((block) => block.text)
-          .join("\n")
-          .trim();
-        // Assistant turns that were pure tool calls (e.g. checking
-        // availability) have no visible text — skip those.
-        return text ? { role: "assistant" as const, text } : null;
-      }
-      return null;
-    })
-    .filter((m): m is { role: "user" | "assistant"; text: string } => m !== null);
-
-  res.json({ messages });
+  res.json({ messages: getConversationTranscript(channelId) });
 });
