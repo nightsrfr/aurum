@@ -5,6 +5,7 @@ import { smsRouter } from "./routes/sms.js";
 import { stripeWebhookRouter } from "./routes/stripeWebhook.js";
 import { demoRouter } from "./routes/demo.js";
 import { chatRouter } from "./routes/chat.js";
+import { adminRouter } from "./routes/admin.js";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(smsRouter);
 app.use(demoRouter);
 app.use(chatRouter);
+app.use(adminRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true, venue: config.venueName }));
 
