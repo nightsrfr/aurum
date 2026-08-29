@@ -11,6 +11,7 @@ import {
   getOverviewStats,
   listConversationSummaries,
   getConversationTranscript,
+  appendStaffMessage,
   listFlags,
   resolveFlag,
   getVenueSettings,
@@ -19,6 +20,7 @@ import {
   upsertTableConfig,
   deleteTableConfig,
 } from "../db.js";
+import { sendSms } from "../services/twilio.js";
 
 export const adminRouter = Router();
 
@@ -177,6 +179,40 @@ adminRouter.get("/admin/api/conversations/:channelId", requireAdminApi, (req, re
   // "+1XXXXXXXXXX" phone number, both of which need escaping in a URL path.
   const channelId = decodeURIComponent(req.params.channelId);
   res.json({ messages: getConversationTranscript(channelId) });
+});
+
+// Staff "jump in" reply: sends a message into an ongoing guest conversation
+// as though it were a bot turn. For an SMS channel (channelId is the
+// guest's phone number, not "web:...") it's actually delivered live over
+// Twilio. For a web-widget conversation there's no live push channel to an
+// already-open tab, so it only becomes visible next time the guest's page
+// loads/reopens — the response says which happened so the UI can be honest
+// about it instead of implying an SMS-style instant delivery.
+adminRouter.post("/admin/api/conversations/:channelId/messages", requireAdminApi, async (req, res) => {
+  const channelId = decodeURIComponent(req.params.channelId);
+  const text = (req.body?.text as string | undefined)?.trim();
+  if (!text) {
+    return res.status(400).json({ error: "text is required" });
+  }
+
+  const messages = appendStaffMessage(channelId, text);
+
+  const isWeb = channelId.startsWith("web:");
+  let delivered: "sms" | "web-only" = "web-only";
+  if (!isWeb) {
+    try {
+      await sendSms(channelId, text);
+      delivered = "sms";
+    } catch (err) {
+      console.error(`Failed to send staff SMS reply to ${channelId}:`, err);
+      return res.status(502).json({
+        error: "Message was saved but the SMS failed to send. Check Twilio config/logs.",
+        messages,
+      });
+    }
+  }
+
+  res.json({ success: true, delivered, messages });
 });
 
 // -- Flags (needs-follow-up queue) --
