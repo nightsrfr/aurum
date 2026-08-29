@@ -16,6 +16,14 @@ type CreatePaymentParams = {
  * If STRIPE_SECRET_KEY isn't set yet, falls back to a local "demo payment"
  * page (see src/routes/demo.ts) so you can test the entire booking + payment
  * + confirmation flow before you've created a Stripe account.
+ *
+ * When Stripe IS configured, this deliberately does NOT create the Stripe
+ * Checkout Session yet — it just points the guest at our own /pay/:bookingId
+ * page (routes/checkout.ts), which creates a fresh embedded session the
+ * moment it's actually loaded. Two reasons: it keeps the guest on our own
+ * domain the whole time instead of redirecting to checkout.stripe.com, and
+ * it sidesteps Checkout Sessions' fixed 24-hour expiry — a guest who opens
+ * the link two days later still gets a brand new, valid session.
  */
 export async function createPaymentLink(params: CreatePaymentParams): Promise<{
   url: string;
@@ -28,7 +36,33 @@ export async function createPaymentLink(params: CreatePaymentParams): Promise<{
     };
   }
 
+  return {
+    url: `${config.baseUrl}/pay/${params.bookingId}`,
+    sessionId: "",
+  };
+}
+
+type CreateEmbeddedSessionParams = {
+  bookingId: string;
+  amountCents: number;
+  description: string;
+};
+
+/**
+ * Creates a Stripe Checkout Session in "embedded" mode — rendered inline on
+ * our own /pay/:bookingId page via Stripe.js instead of redirecting to a
+ * Stripe-hosted page. Called fresh every time that page loads (see
+ * routes/checkout.ts), so this is intentionally cheap to call repeatedly.
+ */
+export async function createEmbeddedCheckoutSession(
+  params: CreateEmbeddedSessionParams
+): Promise<string> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
   const session = await stripe.checkout.sessions.create({
+    ui_mode: "embedded",
     mode: "payment",
     payment_method_types: ["card"],
     line_items: [
@@ -42,11 +76,10 @@ export async function createPaymentLink(params: CreatePaymentParams): Promise<{
       },
     ],
     metadata: { bookingId: params.bookingId },
-    success_url: `${config.baseUrl}/demo/success?booking=${params.bookingId}`,
-    cancel_url: `${config.baseUrl}/demo/cancelled?booking=${params.bookingId}`,
+    return_url: `${config.baseUrl}/pay/${params.bookingId}/return?session_id={CHECKOUT_SESSION_ID}`,
   });
 
-  return { url: session.url!, sessionId: session.id };
+  return session.client_secret!;
 }
 
 export function getStripeClient() {
