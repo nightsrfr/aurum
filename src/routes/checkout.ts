@@ -62,6 +62,21 @@ checkoutRouter.get("/pay/:bookingId", (req, res) => {
     );
   }
 
+  if (!config.stripe.publishableKey) {
+    // Fail loudly and server-side rather than silently in the browser — a
+    // missing STRIPE_PUBLISHABLE_KEY otherwise shows up as nothing more
+    // than a blank box where the payment form should be, which is very
+    // hard to diagnose from the guest's side.
+    console.error(
+      "STRIPE_PUBLISHABLE_KEY is not set — /pay pages cannot load the embedded checkout form."
+    );
+    return res.status(500).type("html").send(
+      paymentPage(
+        `<div class="msg error"><h2>Payment form unavailable</h2><p>We hit a configuration issue on our end (missing publishable key). Let us know in the chat below and we'll get it sorted, or try again shortly.</p></div>`
+      )
+    );
+  }
+
   res.type("html").send(
     paymentPage(`
       <div class="summary">
@@ -73,7 +88,15 @@ checkoutRouter.get("/pay/:bookingId", (req, res) => {
       <script src="https://js.stripe.com/v3/"></script>
       <script>
         (function () {
-          var stripe = Stripe(${JSON.stringify(config.stripe.publishableKey)});
+          var stripe;
+          try {
+            stripe = Stripe(${JSON.stringify(config.stripe.publishableKey)});
+          } catch (e) {
+            document.getElementById("checkout-container").innerHTML =
+              '<p class="error">Could not initialize the payment form (invalid Stripe key). Let us know in the chat below.</p>';
+            console.error("Stripe.js init failed:", e);
+            return;
+          }
           fetch(window.location.pathname + "/session", { method: "POST" })
             .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
             .then(function (result) {
