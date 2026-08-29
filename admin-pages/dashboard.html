@@ -143,6 +143,8 @@
   .conv-transcript .msg.assistant { align-self: flex-start; background: var(--surface-2); color: var(--text); border-bottom-left-radius: 4px; }
   .conv-transcript .msg.assistant.staff { background: rgba(226,178,92,0.16); border: 1px solid rgba(226,178,92,0.35); }
   .conv-transcript .staff-tag { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: var(--warn); margin-bottom: 4px; text-transform: uppercase; }
+  .conv-transcript .msg.assistant.system { background: rgba(94,166,120,0.16); border: 1px solid rgba(94,166,120,0.35); }
+  .conv-transcript .system-tag { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #5ea678; margin-bottom: 4px; text-transform: uppercase; }
   .conv-reply-row { display: flex; gap: 8px; flex-shrink: 0; }
   .conv-reply-row[hidden] { display: none; }
   .conv-reply-row input {
@@ -509,8 +511,13 @@
     }
     el.innerHTML = messages.map(function (m) {
       var isStaff = m.role === "assistant" && m.source === "staff";
-      var cls = "msg " + m.role + (isStaff ? " staff" : "");
-      var tag = isStaff ? '<span class="staff-tag">Staff</span>' : "";
+      var isSystem = m.role === "assistant" && m.source === "system";
+      var cls = "msg " + m.role + (isStaff ? " staff" : "") + (isSystem ? " system" : "");
+      var tag = isStaff
+        ? '<span class="staff-tag">Staff</span>'
+        : isSystem
+        ? '<span class="system-tag">Automated</span>'
+        : "";
       return '<div class="' + cls + '">' + tag + escapeHtml(m.text) + '</div>';
     }).join("");
     el.scrollTop = el.scrollHeight;
