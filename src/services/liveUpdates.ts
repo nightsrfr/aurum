@@ -29,7 +29,7 @@ export function subscribe(channelId: string, res: Response): () => void {
   };
 }
 
-export type LiveMessage = { role: "assistant"; text: string; source: "staff" };
+export type LiveMessage = { role: "assistant"; text: string; source: "staff" | "system" };
 
 /**
  * Pushes a message to every open connection for a channel right now.
