@@ -23,6 +23,10 @@ export const config = {
   stripe: {
     secretKey: env("STRIPE_SECRET_KEY"),
     webhookSecret: env("STRIPE_WEBHOOK_SECRET"),
+    // Safe to expose client-side (unlike the secret key) — needed by the
+    // embedded checkout page (routes/checkout.ts) to initialize Stripe.js
+    // in the guest's browser.
+    publishableKey: env("STRIPE_PUBLISHABLE_KEY"),
   },
   get stripeEnabled() {
     return Boolean(this.stripe.secretKey);
