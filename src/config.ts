@@ -34,4 +34,9 @@ export const config = {
   // Optional link to a bottle-service/VIP menu page. Empty string means
   // "no menu page yet" — the bot falls back to describing pricing verbally.
   menuUrl: env("MENU_URL", ""),
+
+  // Shared password for the /admin console. Empty means the admin panel is
+  // fully locked out (see routes/admin.ts) rather than falling back to an
+  // insecure default — you must set this explicitly before /admin works.
+  adminPassword: env("ADMIN_PASSWORD", ""),
 };
