@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Concierge Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0b0d12;
+    --surface: #141821;
+    --surface-2: #1b212c;
+    --border: rgba(255,255,255,0.08);
+    --text: #e6e9ee;
+    --muted: #8b93a1;
+    --accent: #5b8cff;
+    --accent-2: #22c55e;
+    --danger: #f2555a;
+    --warn: #e2a83c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    display: flex;
+    min-height: 100vh;
+  }
+  a { color: inherit; }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .sidebar .brand {
+    font-size: 15px;
+    font-weight: 700;
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .sidebar .brand span { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    color: var(--muted);
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+  .nav-item.active { color: var(--text); border-left-color: var(--accent); background: rgba(91,140,255,0.08); }
+  .nav-item .badge {
+    background: var(--danger); color: #fff; font-size: 11px; font-weight: 700;
+    border-radius: 999px; padding: 1px 7px; min-width: 18px; text-align: center;
+  }
+  .sidebar-footer { margin-top: auto; padding: 12px 20px 0; border-top: 1px solid var(--border); }
+  .sidebar-footer form { margin-top: 12px; }
+  .logout-btn {
+    width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 8px; font-size: 13px;
+  }
+  .logout-btn:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ---- Main ---- */
+  .main { flex: 1; padding: 32px 40px; max-width: 1200px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .page-header h1 { font-size: 20px; font-weight: 700; }
+  .page-header p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ---- Stat cards ---- */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 26px; font-weight: 700; }
+  .stat-card.warn .value { color: var(--warn); }
+
+  /* ---- Table ---- */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  }
+  .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 11px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px; background: var(--surface-2); }
+  tr:last-child td { border-bottom: none; }
+  .empty-state { color: var(--muted); padding: 40px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 12px; }
+
+  .badge-status { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .badge-status.pending_payment { background: rgba(226,168,60,0.15); color: var(--warn); }
+  .badge-status.confirmed { background: rgba(34,197,94,0.15); color: var(--accent-2); }
+  .badge-status.cancelled { background: rgba(242,85,90,0.15); color: var(--danger); }
+  .badge-status.open { background: rgba(242,85,90,0.15); color: var(--danger); }
+  .badge-status.resolved { background: rgba(139,147,161,0.15); color: var(--muted); }
+
+  select.status-select {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-size: 12px;
+  }
+  .btn {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--danger); }
+  .btn.danger:hover { border-color: var(--danger); }
+  .btn.small { padding: 4px 9px; font-size: 11.5px; }
+
+  /* ---- Conversations ---- */
+  .conv-layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; height: calc(100vh - 160px); }
+  .conv-list { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow-y: auto; }
+  .conv-row { padding: 14px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .conv-row:hover { background: rgba(255,255,255,0.03); }
+  .conv-row.active { background: rgba(91,140,255,0.1); border-left: 3px solid var(--accent); }
+  .conv-row .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .conv-row .channel-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; padding: 1px 7px; border-radius: 999px; }
+  .conv-row .channel-tag.sms { background: rgba(91,140,255,0.15); color: var(--accent); }
+  .conv-row .channel-tag.web { background: rgba(226,178,92,0.15); color: var(--warn); }
+  .conv-row .id { font-weight: 600; font-size: 13px; }
+  .conv-row .time { color: var(--muted); font-size: 11px; }
+  .conv-row .preview { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-transcript { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .conv-transcript .msg { max-width: 70%; padding: 9px 13px; border-radius: 14px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
+  .conv-transcript .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .conv-transcript .msg.assistant { align-self: flex-start; background: var(--surface-2); color: var(--text); border-bottom-left-radius: 4px; }
+
+  /* ---- Flags ---- */
+  .flag-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .flag-card .phone { font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
+  .flag-card .summary { color: var(--text); font-size: 13.5px; margin-bottom: 6px; }
+  .flag-card .time { color: var(--muted); font-size: 11.5px; }
+
+  /* ---- Settings ---- */
+  .settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+  .settings-section h2 { font-size: 15px; margin-bottom: 4px; }
+  .settings-section p.hint { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .field textarea, .field input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; font-family: inherit;
+  }
+  .field textarea { min-height: 60px; resize: vertical; }
+  .field textarea:focus, .field input:focus { outline: none; border-color: var(--accent); }
+
+  .table-row-edit {
+    display: grid; grid-template-columns: 1fr 90px 110px 2fr 70px auto; gap: 8px; align-items: start;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .table-row-edit:last-child { border-bottom: none; }
+  .table-row-edit input, .table-row-edit textarea {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; width: 100%;
+  }
+  .table-row-edit textarea { min-height: 36px; resize: vertical; }
+  .col-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; display: block; }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; background: var(--accent-2); color: #06240f;
+    padding: 12px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3); opacity: 0; transform: translateY(10px);
+    transition: opacity 0.2s ease, transform 0.2s ease; pointer-events: none; z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+  <nav class="sidebar">
+    <div class="brand">Concierge Admin<span id="venueNameLabel">Loading…</span></div>
+    <div class="nav-item active" data-page="overview">Overview</div>
+    <div class="nav-item" data-page="bookings">Bookings</div>
+    <div class="nav-item" data-page="conversations">Conversations</div>
+    <div class="nav-item" data-page="flags"><span>Follow-ups</span><span class="badge" id="flagsBadge" hidden>0</span></div>
+    <div class="nav-item" data-page="settings">Settings</div>
+    <div class="sidebar-footer">
+      <span style="color:var(--muted);font-size:11.5px;">Signed in to admin console</span>
+      <form method="POST" action="/admin/logout">
+        <button class="logout-btn" type="submit">Log out</button>
+      </form>
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- ---- Overview ---- -->
+    <section class="page active" id="page-overview">
+      <div class="page-header">
+        <div>
+          <h1>Overview</h1>
+          <p>A snapshot of bookings, guests, and open items.</p>
+        </div>
+      </div>
+      <div class="stats-grid" id="statsGrid"></div>
+    </section>
+
+    <!-- ---- Bookings ---- -->
+    <section class="page" id="page-bookings">
+      <div class="page-header">
+        <div>
+          <h1>Bookings</h1>
+          <p>Every table booking, from pending payment through confirmation.</p>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="bookingSearch" placeholder="Search name, phone, or table...">
+        <select id="bookingStatusFilter">
+          <option value="">All statuses</option>
+          <option value="pending_payment">Pending payment</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+      <div id="bookingsContainer"></div>
+    </section>
+
+    <!-- ---- Conversations ---- -->
+    <section class="page" id="page-conversations">
+      <div class="page-header">
+        <div>
+          <h1>Conversations</h1>
+          <p>Every guest conversation across SMS and the website widget.</p>
+        </div>
+      </div>
+      <div class="conv-layout">
+        <div class="conv-list" id="convList"></div>
+        <div class="conv-transcript" id="convTranscript">
+          <div style="color:var(--muted);text-align:center;margin-top:40px;">Select a conversation to view the transcript.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Flags ---- -->
+    <section class="page" id="page-flags">
+      <div class="page-header">
+        <div>
+          <h1>Follow-ups</h1>
+          <p>Anything the bot couldn't handle itself — complaints, large groups, special requests.</p>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;">
+          <input type="checkbox" id="showResolvedFlags"> Show resolved
+        </label>
+      </div>
+      <div id="flagsContainer"></div>
+    </section>
+
+    <!-- ---- Settings ---- -->
+    <section class="page" id="page-settings">
+      <div class="page-header">
+        <div>
+          <h1>Settings</h1>
+          <p>Edit what the bot knows and says — changes apply to the very next guest message, no redeploy needed.</p>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2>Venue policies</h2>
+        <p class="hint">This is the exact text the bot draws on when answering questions — write it the way you'd want a guest to hear it.</p>
+        <div id="policiesFields"></div>
+        <button class="btn primary" id="savePoliciesBtn">Save policies</button>
+      </div>
+
+      <div class="settings-section">
+        <h2>Table inventory &amp; pricing</h2>
+        <p class="hint">Each row is one bookable table tier. Deleting a table here doesn't touch existing bookings for it.</p>
+        <div id="tablesFields"></div>
+        <button class="btn" id="addTableBtn" style="margin-top:8px;">+ Add table</button>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  // ---------------------------------------------------------------------
+  // Small shared helpers
+  // ---------------------------------------------------------------------
+  function showToast(msg) {
+    var el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    setTimeout(function () { el.classList.remove("show"); }, 2200);
+  }
+  function fmtMoney(cents) {
+    return "$" + (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+  function fmtDate(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+  function statusLabel(s) {
+    return { pending_payment: "Pending payment", confirmed: "Confirmed", cancelled: "Cancelled",
+             open: "Open", resolved: "Resolved" }[s] || s;
+  }
+  function api(url, opts) {
+    return fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}))
+      .then(function (res) {
+        if (res.status === 401) {
+          window.location.href = "/admin/login";
+          throw new Error("Not authenticated");
+        }
+        return res.json();
+      });
+  }
+
+  // ---------------------------------------------------------------------
+  // Navigation
+  // ---------------------------------------------------------------------
+  var navItems = document.querySelectorAll(".nav-item[data-page]");
+  navItems.forEach(function (item) {
+    item.addEventListener("click", function () {
+      navItems.forEach(function (i) { i.classList.remove("active"); });
+      item.classList.add("active");
+      document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
+      var page = document.getElementById("page-" + item.dataset.page);
+      page.classList.add("active");
+      loaders[item.dataset.page] && loaders[item.dataset.page]();
+    });
+  });
+
+  var loaders = {
+    overview: loadOverview,
+    bookings: loadBookings,
+    conversations: loadConversations,
+    flags: loadFlags,
+    settings: loadSettings,
+  };
+
+  // ---------------------------------------------------------------------
+  // Overview
+  // ---------------------------------------------------------------------
+  function loadOverview() {
+    api("/admin/api/overview").then(function (s) {
+      var cards = [
+        { label: "Total bookings", value: s.totalBookings },
+        { label: "Pending payment", value: s.pendingBookings, warn: true },
+        { label: "Confirmed", value: s.confirmedBookings },
+        { label: "Cancelled", value: s.cancelledBookings },
+        { label: "Confirmed revenue", value: fmtMoney(s.confirmedRevenueCents) },
+        { label: "Conversations", value: s.totalConversations },
+        { label: "Open follow-ups", value: s.openFlags, warn: s.openFlags > 0 },
+      ];
+      document.getElementById("statsGrid").innerHTML = cards.map(function (c) {
+        return '<div class="stat-card' + (c.warn ? ' warn' : '') + '"><div class="label">' + c.label +
+               '</div><div class="value">' + c.value + '</div></div>';
+      }).join("");
+      updateFlagsBadge(s.openFlags);
+    });
+  }
+
+  function updateFlagsBadge(count) {
+    var badge = document.getElementById("flagsBadge");
+    if (count > 0) { badge.hidden = false; badge.textContent = count; }
+    else { badge.hidden = true; }
+  }
+
+  // ---------------------------------------------------------------------
+  // Bookings
+  // ---------------------------------------------------------------------
+  function loadBookings() {
+    var status = document.getElementById("bookingStatusFilter").value;
+    var search = document.getElementById("bookingSearch").value.trim();
+    var qs = [];
+    if (status) qs.push("status=" + encodeURIComponent(status));
+    if (search) qs.push("search=" + encodeURIComponent(search));
+    api("/admin/api/bookings" + (qs.length ? "?" + qs.join("&") : "")).then(function (data) {
+      var container = document.getElementById("bookingsContainer");
+      if (!data.bookings.length) {
+        container.innerHTML = '<div class="empty-state">No bookings match.</div>';
+        return;
+      }
+      var rows = data.bookings.map(function (b) {
+        return "<tr>" +
+          "<td>" + b.date + "</td>" +
+          "<td>" + (b.guest_name || "—") + "</td>" +
+          "<td>" + b.phone + "</td>" +
+          "<td>" + b.table_id + "</td>" +
+          "<td>" + b.party_size + "</td>" +
+          "<td>" + fmtMoney(b.amount_cents) + "</td>" +
+          "<td><span class=\"badge-status " + b.status + "\">" + statusLabel(b.status) + "</span></td>" +
+          "<td>" + fmtDate(b.created_at) + "</td>" +
+          "<td>" +
+            "<select class=\"status-select\" data-id=\"" + b.id + "\">" +
+              ["pending_payment", "confirmed", "cancelled"].map(function (s) {
+                return "<option value=\"" + s + "\"" + (s === b.status ? " selected" : "") + ">" + statusLabel(s) + "</option>";
+              }).join("") +
+            "</select>" +
+          "</td>" +
+        "</tr>";
+      }).join("");
+      container.innerHTML = "<table><thead><tr><th>Date</th><th>Guest</th><th>Phone</th><th>Table</th>" +
+        "<th>Party</th><th>Amount</th><th>Status</th><th>Created</th><th>Update status</th></tr></thead>" +
+        "<tbody>" + rows + "</tbody></table>";
+
+      container.querySelectorAll(".status-select").forEach(function (sel) {
+        sel.addEventListener("change", function () {
+          api("/admin/api/bookings/" + sel.dataset.id + "/status", {
+            method: "POST", body: JSON.stringify({ status: sel.value }),
+          }).then(function () { showToast("Booking updated"); loadOverview(); loadBookings(); });
+        });
+      });
+    });
+  }
+  document.getElementById("bookingStatusFilter").addEventListener("change", loadBookings);
+  var bookingSearchTimer;
+  document.getElementById("bookingSearch").addEventListener("input", function () {
+    clearTimeout(bookingSearchTimer);
+    bookingSearchTimer = setTimeout(loadBookings, 250);
+  });
+
+  // ---------------------------------------------------------------------
+  // Conversations
+  // ---------------------------------------------------------------------
+  var activeConvId = null;
+  function loadConversations() {
+    api("/admin/api/conversations").then(function (data) {
+      var list = document.getElementById("convList");
+      if (!data.conversations.length) {
+        list.innerHTML = '<div class="empty-state" style="border:none;">No conversations yet.</div>';
+        return;
+      }
+      list.innerHTML = data.conversations.map(function (c) {
+        return '<div class="conv-row" data-id="' + encodeURIComponent(c.channelId) + '">' +
+          '<div class="top">' +
+            '<span class="id">' + c.displayId + '</span>' +
+            '<span class="channel-tag ' + c.channel + '">' + c.channel.toUpperCase() + '</span>' +
+          '</div>' +
+          '<div class="preview">' + (c.lastMessagePreview || "—") + '</div>' +
+          '<div class="time">' + fmtDate(c.lastMessageAt) + ' · ' + c.messageCount + ' messages</div>' +
+        '</div>';
+      }).join("");
+
+      list.querySelectorAll(".conv-row").forEach(function (row) {
+        row.addEventListener("click", function () {
+          list.querySelectorAll(".conv-row").forEach(function (r) { r.classList.remove("active"); });
+          row.classList.add("active");
+          openConversation(row.dataset.id);
+        });
+      });
+
+      // Re-open whichever conversation was selected before refresh, if still present.
+      if (activeConvId) {
+        var match = list.querySelector('.conv-row[data-id="' + activeConvId + '"]');
+        if (match) { match.classList.add("active"); openConversation(activeConvId); }
+      }
+    });
+  }
+  function openConversation(encodedId) {
+    activeConvId = encodedId;
+    api("/admin/api/conversations/" + encodedId).then(function (data) {
+      var el = document.getElementById("convTranscript");
+      if (!data.messages.length) {
+        el.innerHTML = '<div style="color:var(--muted);text-align:center;margin-top:40px;">No messages yet.</div>';
+        return;
+      }
+      el.innerHTML = data.messages.map(function (m) {
+        return '<div class="msg ' + m.role + '">' + escapeHtml(m.text) + '</div>';
+      }).join("");
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+  function escapeHtml(str) {
+    var div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ---------------------------------------------------------------------
+  // Flags
+  // ---------------------------------------------------------------------
+  function loadFlags() {
+    var showResolved = document.getElementById("showResolvedFlags").checked;
+    api("/admin/api/flags" + (showResolved ? "" : "?status=open")).then(function (data) {
+      var container = document.getElementById("flagsContainer");
+      if (!data.flags.length) {
+        container.innerHTML = '<div class="empty-state">Nothing flagged right now.</div>';
+        return;
+      }
+      container.innerHTML = data.flags.map(function (f) {
+        return '<div class="flag-card">' +
+          '<div>' +
+            '<div class="phone">' + f.phone + ' <span class="badge-status ' + f.status + '" style="margin-left:8px;">' + statusLabel(f.status) + '</span></div>' +
+            '<div class="summary">' + escapeHtml(f.summary) + '</div>' +
+            '<div class="time">Flagged ' + fmtDate(f.created_at) + '</div>' +
+          '</div>' +
+          (f.status === "open" ? '<button class="btn small primary resolve-btn" data-id="' + f.id + '">Mark resolved</button>' : '') +
+        '</div>';
+      }).join("");
+      container.querySelectorAll(".resolve-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          api("/admin/api/flags/" + btn.dataset.id + "/resolve", { method: "POST" }).then(function () {
+            showToast("Marked resolved");
+            loadFlags();
+            loadOverview();
+          });
+        });
+      });
+    });
+  }
+  document.getElementById("showResolvedFlags").addEventListener("change", loadFlags);
+
+  // ---------------------------------------------------------------------
+  // Settings
+  // ---------------------------------------------------------------------
+  var POLICY_LABELS = {
+    hours: "Hours",
+    agePolicy: "Age / ID policy",
+    dressCode: "Dress code",
+    arrivalPolicy: "Arrival / late policy",
+    paymentPolicy: "Payment policy",
+    cancellationPolicy: "Cancellation policy",
+    walkInPolicy: "Walk-in policy",
+    largeGroupPolicy: "Large group / buyout policy",
+    parkingInfo: "Parking info",
+    musicInfo: "Music / DJ info",
+    otherPolicies: "Other policies",
+  };
+  function prettifyKey(key) {
+    return key.replace(/([A-Z])/g, " $1").replace(/^./, function (c) { return c.toUpperCase(); });
+  }
+
+  var currentTables = [];
+
+  function loadSettings() {
+    api("/admin/api/settings").then(function (data) {
+      document.getElementById("venueNameLabel").textContent = data.venueName;
+
+      var policiesEl = document.getElementById("policiesFields");
+      policiesEl.innerHTML = Object.keys(data.policies).map(function (key) {
+        return '<div class="field">' +
+          '<label>' + (POLICY_LABELS[key] || prettifyKey(key)) + '</label>' +
+          '<textarea data-key="' + key + '">' + escapeHtml(data.policies[key]) + '</textarea>' +
+        '</div>';
+      }).join("");
+
+      currentTables = data.tables;
+      renderTables();
+    });
+  }
+
+  document.getElementById("savePoliciesBtn").addEventListener("click", function () {
+    var updates = {};
+    document.querySelectorAll("#policiesFields textarea").forEach(function (ta) {
+      updates[ta.dataset.key] = ta.value;
+    });
+    api("/admin/api/settings/policies", { method: "POST", body: JSON.stringify(updates) })
+      .then(function () { showToast("Policies saved"); });
+  });
+
+  function renderTables() {
+    var el = document.getElementById("tablesFields");
+    if (!currentTables.length) {
+      el.innerHTML = '<div class="empty-state">No tables configured yet.</div>';
+      return;
+    }
+    el.innerHTML = '<div class="table-row-edit" style="border-bottom:1px solid var(--border);padding-bottom:6px;">' +
+      '<span class="col-label">Name</span><span class="col-label">Capacity</span><span class="col-label">Min spend ($)</span>' +
+      '<span class="col-label">Description</span><span class="col-label">Order</span><span></span></div>' +
+      currentTables.map(function (t, i) {
+        return '<div class="table-row-edit" data-index="' + i + '">' +
+          '<input data-field="name" value="' + escapeHtml(t.name) + '">' +
+          '<input data-field="capacity" type="number" value="' + t.capacity + '">' +
+          '<input data-field="min_spend" type="number" value="' + t.min_spend + '">' +
+          '<textarea data-field="description">' + escapeHtml(t.description) + '</textarea>' +
+          '<input data-field="sort_order" type="number" value="' + t.sort_order + '">' +
+          '<div style="display:flex;flex-direction:column;gap:6px;">' +
+            '<button class="btn small primary save-table-btn">Save</button>' +
+            '<button class="btn small danger delete-table-btn">Delete</button>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+    el.querySelectorAll(".table-row-edit[data-index]").forEach(function (row) {
+      var index = Number(row.dataset.index);
+      row.querySelector(".save-table-btn").addEventListener("click", function () {
+        var t = currentTables[index];
+        var payload = {
+          id: t.id,
+          name: row.querySelector('[data-field="name"]').value,
+          capacity: Number(row.querySelector('[data-field="capacity"]').value),
+          min_spend: Number(row.querySelector('[data-field="min_spend"]').value),
+          description: row.querySelector('[data-field="description"]').value,
+          sort_order: Number(row.querySelector('[data-field="sort_order"]').value),
+        };
+        api("/admin/api/settings/tables", { method: "POST", body: JSON.stringify(payload) }).then(function (data) {
+          currentTables = data.tables;
+          showToast("Table saved");
+          renderTables();
+        });
+      });
+      row.querySelector(".delete-table-btn").addEventListener("click", function () {
+        var t = currentTables[index];
+        api("/admin/api/settings/tables/" + encodeURIComponent(t.id), { method: "DELETE" }).then(function (data) {
+          currentTables = data.tables;
+          showToast("Table deleted");
+          renderTables();
+        });
+      });
+    });
+  }
+
+  document.getElementById("addTableBtn").addEventListener("click", function () {
+    var name = prompt("Table name (e.g. \"Skybox\"):");
+    if (!name) return;
+    var id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || ("table-" + Date.now());
+    var payload = {
+      id: id,
+      name: name,
+      capacity: 6,
+      min_spend: 300,
+      description: "",
+      sort_order: currentTables.length,
+    };
+    api("/admin/api/settings/tables", { method: "POST", body: JSON.stringify(payload) }).then(function (data) {
+      currentTables = data.tables;
+      renderTables();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Initial load
+  // ---------------------------------------------------------------------
+  loadOverview();
+  // Warms the sidebar's venue-name label right away instead of leaving it
+  // on "Loading…" until the guest happens to click into Settings.
+  loadSettings();
+</script>
+</body>
+</html>
