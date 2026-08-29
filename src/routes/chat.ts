@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { runAgent } from "../agent/claude.js";
 import { getConversationTranscript } from "../db.js";
+import { subscribe } from "../services/liveUpdates.js";
 
 export const chatRouter = Router();
 
@@ -52,4 +53,42 @@ chatRouter.get("/api/chat/history", (req, res) => {
 
   const channelId = `web:${sessionId}`;
   res.json({ messages: getConversationTranscript(channelId) });
+});
+
+/**
+ * Server-Sent-Events stream the widget keeps open for as long as its page
+ * is loaded. The only thing ever pushed down it is a staff "jump in" reply
+ * sent from the admin console (see routes/admin.ts) — normal bot replies
+ * already reach the widget directly as the response to its own /api/chat
+ * POST, so they don't need this. This is what makes a staff reply show up
+ * in an already-open guest chat window instantly instead of only on the
+ * next page load.
+ */
+chatRouter.get("/api/chat/stream", (req, res) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  if (!sessionId || typeof sessionId !== "string") {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+  const channelId = `web:${sessionId}`;
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  });
+  res.write("\n");
+
+  const unsubscribe = subscribe(channelId, res);
+
+  // Some hosts/proxies (Render included) close idle connections after
+  // ~55-100s of silence. A comment line every 25s resets that clock without
+  // EventSource treating it as a real message.
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
