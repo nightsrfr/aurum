@@ -80,6 +80,24 @@ db.exec(`
   );
 `);
 
+// ---- Lightweight migrations for columns added after initial deploy --------
+//
+// better-sqlite3 has no built-in migration runner, and CREATE TABLE IF NOT
+// EXISTS above does nothing for a table that already exists on a live
+// database (Render's persistent disk, in this app's case) — it would just
+// silently keep the old schema. ALTER TABLE ... ADD COLUMN is the standard
+// lightweight fix: try it, and swallow the "duplicate column" error on any
+// run where the column is already there (every run after the first).
+function addColumnIfMissing(table: string, columnDef: string) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (err: any) {
+    if (!String(err?.message).includes("duplicate column name")) throw err;
+  }
+}
+addColumnIfMissing("bookings", "channel_id TEXT");
+addColumnIfMissing("staff_message_markers", "source TEXT NOT NULL DEFAULT 'staff'");
+
 // ---- One-time seeding --------------------------------------------------
 
 const DEFAULT_VENUE_SETTINGS: Record<string, string> = {
@@ -158,17 +176,20 @@ export function saveConversation(phone: string, history: ConversationMessage[]) 
   ).run(phone, JSON.stringify(history), now);
 }
 
+export type MessageSource = "guest" | "bot" | "staff" | "system";
+
 export type TranscriptMessage = {
   role: "user" | "assistant";
   text: string;
-  source: "guest" | "bot" | "staff";
+  source: MessageSource;
 };
 
-function getStaffSeqSet(channelId: string): Set<number> {
+/** Non-bot sources recorded for assistant-turns in one conversation, keyed by seq (see getConversationTranscript). */
+function getMessageSourceMap(channelId: string): Map<number, MessageSource> {
   const rows = db
-    .prepare(`SELECT seq FROM staff_message_markers WHERE channel_id = ?`)
-    .all(channelId) as { seq: number }[];
-  return new Set(rows.map((r) => r.seq));
+    .prepare(`SELECT seq, source FROM staff_message_markers WHERE channel_id = ?`)
+    .all(channelId) as { seq: number; source: MessageSource }[];
+  return new Map(rows.map((r) => [r.seq, r.source]));
 }
 
 /**
@@ -176,12 +197,14 @@ function getStaffSeqSet(channelId: string): Set<number> {
  * with tool_use/tool_result plumbing) into just the plain-text turns a
  * human would want to read — used by both the widget's history-restore
  * endpoint and the admin conversation viewer, so the filtering logic only
- * lives in one place. Each assistant turn is tagged "bot" or "staff" based
- * on staff_message_markers, keyed by that message's index in this output.
+ * lives in one place. Each assistant turn is tagged "bot" unless it's been
+ * marked otherwise ("staff" for an admin's typed reply, "system" for an
+ * automated one like a payment confirmation), keyed by that message's index
+ * in this output — see getMessageSourceMap.
  */
 export function getConversationTranscript(channelId: string): TranscriptMessage[] {
   const history = loadConversation(channelId);
-  const staffSeqs = getStaffSeqSet(channelId);
+  const sources = getMessageSourceMap(channelId);
   const out: TranscriptMessage[] = [];
   for (const m of history) {
     if (m.role === "user") {
@@ -198,30 +221,34 @@ export function getConversationTranscript(channelId: string): TranscriptMessage[
         .trim();
       if (text) {
         const seq = out.length;
-        out.push({ role: "assistant", text, source: staffSeqs.has(seq) ? "staff" : "bot" });
+        out.push({ role: "assistant", text, source: sources.get(seq) ?? "bot" });
       }
     }
   }
   return out;
 }
 
-/** Records that the assistant-turn at `seq` (see getConversationTranscript) was staff-authored. */
-export function markStaffMessage(channelId: string, seq: number): void {
+/** Records that the assistant-turn at `seq` (see getConversationTranscript) came from something other than the bot itself. */
+function markMessageSource(channelId: string, seq: number, source: "staff" | "system"): void {
   db.prepare(
-    `INSERT INTO staff_message_markers (channel_id, seq, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(channel_id, seq) DO NOTHING`
-  ).run(channelId, seq, new Date().toISOString());
+    `INSERT INTO staff_message_markers (channel_id, seq, source, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(channel_id, seq) DO UPDATE SET source = excluded.source`
+  ).run(channelId, seq, source, new Date().toISOString());
 }
 
 /**
- * Appends a staff-typed message to a conversation, stored in the exact same
- * shape as a bot reply ({ role: "assistant", content: [{ type: "text", text }] })
- * so it's indistinguishable from a normal turn the next time this history is
- * sent to the Anthropic API. Marks it as staff-authored for display, and
- * returns the freshly recomputed transcript. Delivery (SMS vs. web-only) is
+ * Appends a message to a conversation, stored in the exact same shape as a
+ * bot reply ({ role: "assistant", content: [{ type: "text", text }] }) so
+ * it's indistinguishable from a normal turn the next time this history is
+ * sent to the Anthropic API. Tags it with `source` for display, and returns
+ * the freshly recomputed transcript. Delivery (SMS/live-push/web-only) is
  * the caller's responsibility — this function only persists the message.
  */
-export function appendStaffMessage(channelId: string, text: string): TranscriptMessage[] {
+function appendAssistantMessage(
+  channelId: string,
+  text: string,
+  source: "staff" | "system"
+): TranscriptMessage[] {
   const history = loadConversation(channelId);
   history.push({ role: "assistant", content: [{ type: "text", text }] });
   saveConversation(channelId, history);
@@ -229,9 +256,19 @@ export function appendStaffMessage(channelId: string, text: string): TranscriptM
   // The message we just appended is always the newest one, so it lands at
   // the end of the freshly filtered transcript.
   const seq = getConversationTranscript(channelId).length - 1;
-  markStaffMessage(channelId, seq);
+  markMessageSource(channelId, seq, source);
 
   return getConversationTranscript(channelId);
+}
+
+/** An admin's typed reply from the "jump in" box on the Conversations tab. */
+export function appendStaffMessage(channelId: string, text: string): TranscriptMessage[] {
+  return appendAssistantMessage(channelId, text, "staff");
+}
+
+/** An automated message not typed by anyone — e.g. a payment confirmation. */
+export function appendSystemMessage(channelId: string, text: string): TranscriptMessage[] {
+  return appendAssistantMessage(channelId, text, "system");
 }
 
 export type ConversationSummary = {
@@ -276,6 +313,14 @@ export type Booking = {
   status: string;
   payment_url: string | null;
   stripe_session_id: string | null;
+  // The conversation this booking came from (e.g. "web:<uuid>" for the web
+  // widget, or a real SMS number). In practice this is always the same value
+  // as `phone` today (runAgent forces the tool's phone input to match the
+  // real channel), but keeping it as its own explicit column means a payment
+  // confirmation can always find its way back to the right chat even if
+  // `phone` is ever changed to hold a guest-supplied callback number instead.
+  // Nullable because bookings created before this column existed have none.
+  channel_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -294,8 +339,8 @@ export function createBooking(booking: Omit<Booking, "created_at" | "updated_at"
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO bookings
-      (id, phone, guest_name, date, party_size, table_id, amount_cents, status, payment_url, stripe_session_id, created_at, updated_at)
-     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @status, @payment_url, @stripe_session_id, @now, @now)`
+      (id, phone, guest_name, date, party_size, table_id, amount_cents, status, payment_url, stripe_session_id, channel_id, created_at, updated_at)
+     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @status, @payment_url, @stripe_session_id, @channel_id, @now, @now)`
   ).run({ ...booking, now });
 }
 
