@@ -136,10 +136,21 @@
   .conv-row .id { font-weight: 600; font-size: 13px; }
   .conv-row .time { color: var(--muted); font-size: 11px; }
   .conv-row .preview { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .conv-transcript { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .conv-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .conv-transcript { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
   .conv-transcript .msg { max-width: 70%; padding: 9px 13px; border-radius: 14px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
   .conv-transcript .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
   .conv-transcript .msg.assistant { align-self: flex-start; background: var(--surface-2); color: var(--text); border-bottom-left-radius: 4px; }
+  .conv-transcript .msg.assistant.staff { background: rgba(226,178,92,0.16); border: 1px solid rgba(226,178,92,0.35); }
+  .conv-transcript .staff-tag { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: var(--warn); margin-bottom: 4px; text-transform: uppercase; }
+  .conv-reply-row { display: flex; gap: 8px; flex-shrink: 0; }
+  .conv-reply-row[hidden] { display: none; }
+  .conv-reply-row input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 10px 13px; font-size: 13.5px; font-family: inherit;
+  }
+  .conv-reply-row input:focus { outline: none; border-color: var(--accent); }
+  .conv-reply-note { color: var(--muted); font-size: 11.5px; min-height: 14px; flex-shrink: 0; }
 
   /* ---- Flags ---- */
   .flag-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
@@ -241,8 +252,15 @@
       </div>
       <div class="conv-layout">
         <div class="conv-list" id="convList"></div>
-        <div class="conv-transcript" id="convTranscript">
-          <div style="color:var(--muted);text-align:center;margin-top:40px;">Select a conversation to view the transcript.</div>
+        <div class="conv-panel">
+          <div class="conv-transcript" id="convTranscript">
+            <div style="color:var(--muted);text-align:center;margin-top:40px;">Select a conversation to view the transcript.</div>
+          </div>
+          <div class="conv-reply-row" id="convReplyRow" hidden>
+            <input type="text" id="convReplyInput" placeholder="Type a message to send as staff...">
+            <button class="btn primary" id="convReplySend">Send</button>
+          </div>
+          <div class="conv-reply-note" id="convReplyNote"></div>
         </div>
       </div>
     </section>
@@ -466,18 +484,65 @@
   }
   function openConversation(encodedId) {
     activeConvId = encodedId;
+    var isWeb = decodeURIComponent(encodedId).indexOf("web:") === 0;
+    document.getElementById("convReplyRow").hidden = false;
+    document.getElementById("convReplyNote").textContent = isWeb
+      ? "Website widget conversation — a staff reply here only appears once the guest reloads or reopens the chat."
+      : "Sent live via text message to the guest's phone.";
     api("/admin/api/conversations/" + encodedId).then(function (data) {
-      var el = document.getElementById("convTranscript");
-      if (!data.messages.length) {
-        el.innerHTML = '<div style="color:var(--muted);text-align:center;margin-top:40px;">No messages yet.</div>';
-        return;
-      }
-      el.innerHTML = data.messages.map(function (m) {
-        return '<div class="msg ' + m.role + '">' + escapeHtml(m.text) + '</div>';
-      }).join("");
-      el.scrollTop = el.scrollHeight;
+      renderTranscript(data.messages);
     });
   }
+  function renderTranscript(messages) {
+    var el = document.getElementById("convTranscript");
+    if (!messages.length) {
+      el.innerHTML = '<div style="color:var(--muted);text-align:center;margin-top:40px;">No messages yet.</div>';
+      return;
+    }
+    el.innerHTML = messages.map(function (m) {
+      var isStaff = m.role === "assistant" && m.source === "staff";
+      var cls = "msg " + m.role + (isStaff ? " staff" : "");
+      var tag = isStaff ? '<span class="staff-tag">Staff</span>' : "";
+      return '<div class="' + cls + '">' + tag + escapeHtml(m.text) + '</div>';
+    }).join("");
+    el.scrollTop = el.scrollHeight;
+  }
+  function sendStaffReply() {
+    var input = document.getElementById("convReplyInput");
+    var note = document.getElementById("convReplyNote");
+    var btn = document.getElementById("convReplySend");
+    var text = input.value.trim();
+    if (!text || !activeConvId) return;
+    btn.disabled = true;
+    api("/admin/api/conversations/" + activeConvId + "/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: text }),
+    }).then(function (data) {
+      btn.disabled = false;
+      if (data.error) {
+        note.textContent = data.error;
+        if (data.messages) renderTranscript(data.messages);
+        return;
+      }
+      input.value = "";
+      renderTranscript(data.messages);
+      note.textContent = data.delivered === "sms"
+        ? "Sent live via text message to the guest's phone."
+        : "Website widget conversation — a staff reply here only appears once the guest reloads or reopens the chat.";
+      showToast("Message sent");
+      loadConversations();
+    }).catch(function () {
+      btn.disabled = false;
+      note.textContent = "Failed to send — check your connection and try again.";
+    });
+  }
+  document.getElementById("convReplySend").addEventListener("click", sendStaffReply);
+  document.getElementById("convReplyInput").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendStaffReply();
+    }
+  });
   function escapeHtml(str) {
     var div = document.createElement("div");
     div.textContent = str;
