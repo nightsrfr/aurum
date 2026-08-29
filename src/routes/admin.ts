@@ -21,6 +21,7 @@ import {
   deleteTableConfig,
 } from "../db.js";
 import { sendSms } from "../services/twilio.js";
+import { publish } from "../services/liveUpdates.js";
 
 export const adminRouter = Router();
 
@@ -183,11 +184,13 @@ adminRouter.get("/admin/api/conversations/:channelId", requireAdminApi, (req, re
 
 // Staff "jump in" reply: sends a message into an ongoing guest conversation
 // as though it were a bot turn. For an SMS channel (channelId is the
-// guest's phone number, not "web:...") it's actually delivered live over
-// Twilio. For a web-widget conversation there's no live push channel to an
-// already-open tab, so it only becomes visible next time the guest's page
-// loads/reopens — the response says which happened so the UI can be honest
-// about it instead of implying an SMS-style instant delivery.
+// guest's phone number, not "web:...") it's delivered live over Twilio. For
+// a web-widget conversation it's pushed over the SSE stream the widget
+// keeps open (see /api/chat/stream in routes/chat.ts) so it appears in an
+// already-open chat window immediately; if the guest doesn't currently have
+// the page open, it's still saved and will show up next time they do. The
+// response says exactly which of those happened so the UI never overclaims
+// instant delivery it can't actually confirm.
 adminRouter.post("/admin/api/conversations/:channelId/messages", requireAdminApi, async (req, res) => {
   const channelId = decodeURIComponent(req.params.channelId);
   const text = (req.body?.text as string | undefined)?.trim();
@@ -198,8 +201,11 @@ adminRouter.post("/admin/api/conversations/:channelId/messages", requireAdminApi
   const messages = appendStaffMessage(channelId, text);
 
   const isWeb = channelId.startsWith("web:");
-  let delivered: "sms" | "web-only" = "web-only";
-  if (!isWeb) {
+  let delivered: "sms" | "web-live" | "web-queued" = "web-queued";
+  if (isWeb) {
+    const pushed = publish(channelId, { role: "assistant", text, source: "staff" });
+    delivered = pushed ? "web-live" : "web-queued";
+  } else {
     try {
       await sendSms(channelId, text);
       delivered = "sms";
