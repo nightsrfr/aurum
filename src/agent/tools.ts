@@ -69,7 +69,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
   },
 ];
 
-export async function runTool(name: string, input: any): Promise<any> {
+export async function runTool(name: string, input: any, channelId: string): Promise<any> {
   switch (name) {
     case "get_table_options":
       return { tables: getTables() };
@@ -116,6 +116,7 @@ export async function runTool(name: string, input: any): Promise<any> {
         status: "pending_payment",
         payment_url: null,
         stripe_session_id: null,
+        channel_id: channelId,
       });
 
       const payment = await createPaymentLink({
