@@ -5,7 +5,16 @@ import { randomUUID } from "node:crypto";
 import defaultTables from "./data/tables.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const db = new Database(path.join(__dirname, "..", "concierge.sqlite"));
+
+// On Render (or any host with an ephemeral filesystem), the entire
+// filesystem resets to the deployed code on every deploy AND every restart
+// — including ones Render triggers on its own, not just when new code is
+// pushed. Without DB_PATH pointing at a mounted persistent Disk, this file
+// (and every booking, conversation, and flag in it) can disappear at any
+// time. Falls back to a file next to the project root for local
+// development, where that risk doesn't apply.
+const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "concierge.sqlite");
+export const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
 
