@@ -48,12 +48,21 @@ export async function confirmBooking(bookingId: string) {
 
   // channel_id is the conversation this booking actually came from. Older
   // bookings created before that column existed won't have it — fall back to
-  // `phone`, which today always holds the same value anyway (see the Booking
-  // type in db.ts for why they're kept as separate columns).
+  // `phone`, which today always holds the same value for those old rows
+  // anyway (see the Booking type in db.ts for why they're kept separate).
   const channelId: string = booking.channel_id ?? booking.phone;
   const isWeb = channelId.startsWith("web:");
 
-  const message = `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}! A confirmation text is on its way with all the details. Just give the door the name "${booking.guest_name}" and you're in. We can't wait to see you — get ready for an unforgettable night!`;
+  // `phone` is a real, textable number whenever this booking came from SMS
+  // (it's always the number they're texting from), or from the web widget
+  // AFTER the bot started asking guests for one during booking. It'll still
+  // be the non-phone "web:<uuid>" placeholder on any web booking made before
+  // that change — there's nothing real to text in that case.
+  const hasRealPhone = Boolean(booking.phone) && !String(booking.phone).startsWith("web:");
+
+  const message = hasRealPhone
+    ? `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}! A confirmation text is on its way to ${booking.phone} with all the details. Just give the door the name "${booking.guest_name}" and you're in. We can't wait to see you — get ready for an unforgettable night!`
+    : `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}! Just give the door the name "${booking.guest_name}" and you're in. We can't wait to see you — get ready for an unforgettable night!`;
 
   // Drop the confirmation into the guest's actual chat, tagged as a system
   // message (not a normal bot reply) so the admin transcript can tell them
@@ -65,11 +74,16 @@ export async function confirmBooking(bookingId: string) {
     // Push it instantly if the guest's tab is still open; if not, it's
     // already saved above and will show up next time the widget loads.
     publish(channelId, { role: "assistant", text: message, source: "system" });
-  } else {
+  }
+
+  // Independently of the chat channel, also text the guest's real phone
+  // whenever we actually have one — this is what makes "a confirmation text
+  // is on its way" literally true for a web-widget booking too, not just SMS.
+  if (hasRealPhone) {
     try {
-      await sendSms(channelId, message);
+      await sendSms(booking.phone, message);
     } catch (err) {
-      console.error(`Failed to send payment-confirmation SMS to ${channelId}:`, err);
+      console.error(`Failed to send payment-confirmation SMS to ${booking.phone}:`, err);
     }
   }
 }
