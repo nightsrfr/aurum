@@ -22,12 +22,13 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
   ];
 
   let finalText = "Sorry, I'm having trouble right now — someone from our team will follow up shortly.";
+  const channel: "sms" | "web" = phone.startsWith("web:") ? "web" : "sms";
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await anthropic.messages.create({
       model: config.claudeModel,
       max_tokens: 1024,
-      system: getSystemPrompt(),
+      system: getSystemPrompt(channel),
       tools: toolDefinitions,
       messages,
     });
@@ -49,8 +50,15 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of toolUseBlocks) {
+      // For an SMS conversation, `phone` (the channel id this function was
+      // called with) already IS the guest's real number — force it onto the
+      // tool input so the model can't hallucinate or mistype it. For the
+      // web widget, `phone` is just "web:<uuid>", not a real number, so
+      // leave whatever actual phone number the model collected from the
+      // guest during the conversation untouched — that's the one that gets
+      // texted the payment/booking confirmation.
       const input =
-        block.name === "start_booking" || block.name === "flag_for_human"
+        (block.name === "start_booking" || block.name === "flag_for_human") && channel !== "web"
           ? { ...(block.input as any), phone }
           : block.input;
       const result = await runTool(block.name, input, phone);
