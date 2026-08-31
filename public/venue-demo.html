@@ -88,6 +88,10 @@
     position: relative;
   }
   .hero .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; position: relative; }
+  .text-cta {
+    margin-top: 22px; font-size: 14px; color: var(--muted); position: relative;
+  }
+  .text-cta a { color: var(--accent-2); font-weight: 600; text-decoration: underline; }
 
   /* ---- Sections ---- */
   section { padding: 96px 0; }
@@ -173,6 +177,7 @@
       <a class="btn" href="#" onclick="openBookingWidget(); return false;">Reserve a Table</a>
       <a class="btn ghost" href="#tables">View Tables</a>
     </div>
+    <p class="text-cta">Prefer to text? Message <a href="sms:+12028758563">+1 (202) 875-8563</a> for table reservations.</p>
   </section>
 
   <section id="about">
@@ -220,6 +225,9 @@
       <p style="text-align:center;margin-top:36px;color:var(--muted);font-size:14px;">
         Every table includes bottle service. <a href="menu.html" style="color:var(--accent-2);font-weight:600;text-decoration:underline;">View the full bottle menu &rarr;</a>
       </p>
+      <p class="text-cta" style="text-align:center;">
+        For table reservations, you can also text <a href="sms:+12028758563">+1 (202) 875-8563</a> directly.
+      </p>
     </div>
   </section>
 
@@ -256,8 +264,7 @@
       s.setAttribute("data-api-base", window.location.origin);
       s.setAttribute("data-venue-name", "AURUM");
       s.setAttribute("data-accent-color", "#c81845");
-      // Once you have the new Twilio number, uncomment the line below:
-      // s.setAttribute("data-phone", "+1XXXXXXXXXX");
+      s.setAttribute("data-phone", "+12028758563");
       document.body.appendChild(s);
     })();
 
