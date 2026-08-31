@@ -15,6 +15,16 @@ export const config = {
     accountSid: env("TWILIO_ACCOUNT_SID"),
     authToken: env("TWILIO_AUTH_TOKEN"),
     fromNumber: env("TWILIO_FROM_NUMBER"),
+    // Optional. When the sending number is A2P 10DLC-registered (US long
+    // codes usually are), Twilio requires outbound application messages to
+    // go out via the Messaging Service that carries the campaign
+    // registration, not a bare "from" number — sending with just
+    // TWILIO_FROM_NUMBER once the number belongs to a registered campaign
+    // fails with error 30034. Set this to that Messaging Service's SID
+    // (starts with "MG...") to send through it instead; leave blank to keep
+    // sending from TWILIO_FROM_NUMBER directly (fine for numbers that were
+    // never put in a Messaging Service / don't need 10DLC registration).
+    messagingServiceSid: env("TWILIO_MESSAGING_SERVICE_SID"),
   },
   get twilioEnabled() {
     return Boolean(this.twilio.accountSid && this.twilio.authToken && this.twilio.fromNumber);
