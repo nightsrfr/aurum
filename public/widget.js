@@ -318,6 +318,10 @@
     window.visualViewport.addEventListener("resize", syncPanelHeight);
   }
 
+  // Remembers the page's own scroll lock state so closePanel() only ever
+  // restores what openPanel() itself changed.
+  var bodyOverflowBeforeOpen = "";
+
   function openPanel() {
     panel.classList.remove("hidden");
     launcher.classList.add("hidden");
@@ -325,13 +329,38 @@
     setPanelOpenStored(true);
     if (!opened) showGreeting();
     syncPanelHeight();
-    input.focus();
+
+    if (isMobile) {
+      // The full-screen mobile panel is position:fixed, top:0 — but iOS
+      // Safari positions "fixed" relative to the layout viewport, not
+      // what's actually on screen. If the guest had scrolled the page
+      // (or the address bar hadn't collapsed yet) the instant the panel
+      // opened, the panel could render below the visible area, so it
+      // looked like the tap did nothing until you scrolled to find it.
+      // Snapping to the top first, and locking background scroll while
+      // the panel is open, keeps the panel's fixed position aligned with
+      // what's actually visible.
+      window.scrollTo(0, 0);
+      bodyOverflowBeforeOpen = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      // Also defer focusing the input: focusing immediately pops the
+      // keyboard while the browser is still settling the scroll/address
+      // bar from the line above, which is exactly the kind of mid-layout
+      // shift that made the panel appear to jump off-screen. Giving it a
+      // beat lets that settle first.
+      setTimeout(function () { input.focus(); }, 300);
+    } else {
+      input.focus();
+    }
   }
   function closePanel() {
     panel.classList.add("hidden");
     launcher.classList.remove("hidden");
     setPanelOpenStored(false);
     panel.style.height = "";
+    if (isMobile) {
+      document.body.style.overflow = bodyOverflowBeforeOpen;
+    }
   }
 
   launcher.addEventListener("click", function () {
@@ -403,6 +432,15 @@
           launcher.classList.add("hidden");
           if (!opened) showGreeting();
           syncPanelHeight();
+          // Same full-screen scroll lock as openPanel() below — this path
+          // reopens the chat automatically after a same-site navigation
+          // (e.g. index.html -> menu.html mid-conversation), so it needs
+          // the same treatment or the guest could scroll the page behind
+          // a "full screen" chat that isn't actually locking it in place.
+          if (isMobile) {
+            bodyOverflowBeforeOpen = document.body.style.overflow;
+            document.body.style.overflow = "hidden";
+          }
         }
       })
       .catch(function () {
@@ -414,6 +452,15 @@
           launcher.classList.add("hidden");
           if (!opened) showGreeting();
           syncPanelHeight();
+          // Same full-screen scroll lock as openPanel() below — this path
+          // reopens the chat automatically after a same-site navigation
+          // (e.g. index.html -> menu.html mid-conversation), so it needs
+          // the same treatment or the guest could scroll the page behind
+          // a "full screen" chat that isn't actually locking it in place.
+          if (isMobile) {
+            bodyOverflowBeforeOpen = document.body.style.overflow;
+            document.body.style.overflow = "hidden";
+          }
         }
       });
   }
