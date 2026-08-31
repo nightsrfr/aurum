@@ -87,6 +87,9 @@
   .stat-card .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-card .value { font-size: 26px; font-weight: 700; }
   .stat-card.warn .value { color: var(--warn); }
+  .stat-card.clickable { cursor: pointer; transition: border-color 0.15s ease, transform 0.1s ease; }
+  .stat-card.clickable:hover { border-color: var(--accent); }
+  .stat-card.clickable:active { transform: scale(0.98); }
 
   /* ---- Table ---- */
   .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
@@ -346,15 +349,26 @@
   // Navigation
   // ---------------------------------------------------------------------
   var navItems = document.querySelectorAll(".nav-item[data-page]");
+
+  // Shared by sidebar nav clicks and the clickable Overview stat cards below,
+  // so both paths switch pages the same way. bookingStatusFilter is optional
+  // — pass it (including "" for "All statuses") to also set the Bookings
+  // filter dropdown as part of the jump, e.g. clicking the "Confirmed" card.
+  function goToPage(pageName, bookingStatusFilter) {
+    navItems.forEach(function (i) { i.classList.remove("active"); });
+    var navItem = document.querySelector('.nav-item[data-page="' + pageName + '"]');
+    if (navItem) navItem.classList.add("active");
+    document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
+    var page = document.getElementById("page-" + pageName);
+    if (page) page.classList.add("active");
+    if (pageName === "bookings" && bookingStatusFilter !== undefined) {
+      document.getElementById("bookingStatusFilter").value = bookingStatusFilter;
+    }
+    loaders[pageName] && loaders[pageName]();
+  }
+
   navItems.forEach(function (item) {
-    item.addEventListener("click", function () {
-      navItems.forEach(function (i) { i.classList.remove("active"); });
-      item.classList.add("active");
-      document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
-      var page = document.getElementById("page-" + item.dataset.page);
-      page.classList.add("active");
-      loaders[item.dataset.page] && loaders[item.dataset.page]();
-    });
+    item.addEventListener("click", function () { goToPage(item.dataset.page); });
   });
 
   var loaders = {
@@ -370,19 +384,25 @@
   // ---------------------------------------------------------------------
   function loadOverview() {
     api("/admin/api/overview").then(function (s) {
+      // goto/filter drive what happens on click — see goToPage() above.
+      // filter: "" (not just omitted) means "jump to Bookings and clear any
+      // existing status filter", which is what "Total bookings" should do.
       var cards = [
-        { label: "Total bookings", value: s.totalBookings },
-        { label: "Pending payment", value: s.pendingBookings, warn: true },
-        { label: "Confirmed", value: s.confirmedBookings },
-        { label: "Cancelled", value: s.cancelledBookings },
-        { label: "Confirmed revenue", value: fmtMoney(s.confirmedRevenueCents) },
-        { label: "Conversations", value: s.totalConversations },
-        { label: "Open follow-ups", value: s.openFlags, warn: s.openFlags > 0 },
+        { label: "Total bookings", value: s.totalBookings, goto: "bookings", filter: "" },
+        { label: "Pending payment", value: s.pendingBookings, warn: true, goto: "bookings", filter: "pending_payment" },
+        { label: "Confirmed", value: s.confirmedBookings, goto: "bookings", filter: "confirmed" },
+        { label: "Cancelled", value: s.cancelledBookings, goto: "bookings", filter: "cancelled" },
+        { label: "Confirmed revenue", value: fmtMoney(s.confirmedRevenueCents), goto: "bookings", filter: "confirmed" },
+        { label: "Conversations", value: s.totalConversations, goto: "conversations" },
+        { label: "Open follow-ups", value: s.openFlags, warn: s.openFlags > 0, goto: "flags" },
       ];
-      document.getElementById("statsGrid").innerHTML = cards.map(function (c) {
-        return '<div class="stat-card' + (c.warn ? ' warn' : '') + '"><div class="label">' + c.label +
+      document.getElementById("statsGrid").innerHTML = cards.map(function (c, i) {
+        return '<div class="stat-card clickable' + (c.warn ? ' warn' : '') + '" data-index="' + i + '" title="View ' + c.label.toLowerCase() + '"><div class="label">' + c.label +
                '</div><div class="value">' + c.value + '</div></div>';
       }).join("");
+      document.querySelectorAll("#statsGrid .stat-card").forEach(function (el, i) {
+        el.addEventListener("click", function () { goToPage(cards[i].goto, cards[i].filter); });
+      });
       updateFlagsBadge(s.openFlags);
     });
   }
@@ -717,6 +737,27 @@
       renderTables();
     });
   });
+
+  // ---------------------------------------------------------------------
+  // Keep data fresh without a manual reload
+  // ---------------------------------------------------------------------
+  // There's no live push connection into this dashboard (unlike the guest
+  // widget, which gets staff replies instantly over SSE) — a new booking,
+  // incoming text, or flag from another guest wouldn't otherwise show up
+  // here until you clicked to a page or reloaded. Poll every 15s instead:
+  // cheap, and close enough to "live" for a single-operator pilot.
+  //
+  // Settings is deliberately left out of the poll — silently re-rendering
+  // the policies/table-inventory forms out from under someone mid-edit
+  // would discard whatever they hadn't saved yet.
+  setInterval(function () {
+    loadOverview();
+    var activeItem = document.querySelector(".nav-item.active");
+    var activePage = activeItem && activeItem.dataset.page;
+    if (activePage === "bookings") loadBookings();
+    else if (activePage === "conversations") loadConversations(true);
+    else if (activePage === "flags") loadFlags();
+  }, 15000);
 
   // ---------------------------------------------------------------------
   // Initial load
