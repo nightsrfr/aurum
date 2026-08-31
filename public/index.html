@@ -41,6 +41,10 @@
     font-size: 20px; font-weight: 800; letter-spacing: 6px;
     color: var(--text);
   }
+  .nav-text-cta {
+    font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  }
+  .nav-text-cta a { color: var(--accent-2); font-weight: 600; text-decoration: underline; }
   .nav-links { display: flex; align-items: center; gap: 28px; }
   .nav-links a { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); text-decoration: none; }
   .nav-links a:hover { color: var(--text); }
@@ -171,6 +175,13 @@
     color: #6c6870; border-top: 1px solid var(--border); padding-top: 20px;
   }
 
+  /* Hides earlier than the main 760px mobile breakpoint below — the nav
+     row runs out of room for it (colliding with the links) well before
+     the rest of the layout needs to go single-column. */
+  @media (max-width: 900px) {
+    .nav-text-cta { display: none; }
+  }
+
   @media (max-width: 760px) {
     .nav-links a:not(.btn) { display: none; }
     .about-grid, .tables-grid, .info-grid { grid-template-columns: 1fr; }
@@ -183,6 +194,7 @@
   <header class="nav">
     <div class="nav-inner">
       <div class="logo">AURUM</div>
+      <div class="nav-text-cta">For table reservations, text <a href="sms:+12028758563">+1 (202) 875-8563</a></div>
       <div class="nav-links">
         <a href="#about">About</a>
         <a href="#tables">VIP Tables</a>
