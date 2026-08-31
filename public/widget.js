@@ -143,6 +143,7 @@
     "padding:14px 20px;font-size:15px;font-weight:600;cursor:pointer;" +
     "box-shadow:0 8px 24px rgba(0,0,0,0.25);display:flex;align-items:center;gap:8px;}" +
     ".launcher:hover{filter:brightness(1.08);}" +
+    ".launcher.hidden{display:none;}" +
     ".launcher.hasUnread::after{content:'';position:absolute;top:-2px;right:-2px;" +
     "width:12px;height:12px;border-radius:50%;background:#ff3b30;border:2px solid #fff;}" +
     ".panel{position:fixed;bottom:88px;right:20px;width:340px;max-width:calc(100vw - 32px);" +
@@ -165,14 +166,32 @@
     ".msg.typing{align-self:flex-start;background:#eee;color:#888;font-style:italic;}" +
     ".footer{border-top:1px solid #eee;padding:10px;}" +
     ".textRow{display:flex;gap:8px;}" +
+    // 16px is deliberate, not a style choice: any input under 16px makes iOS
+    // Safari auto-zoom the whole page in when the guest taps it, which is
+    // what threw the fixed-position panel out of alignment with the
+    // keyboard/toolbar in the screenshots.
     ".textRow input{flex:1;border:1px solid #ddd;border-radius:20px;padding:9px 14px;" +
-    "font-size:13.5px;outline:none;}" +
+    "font-size:16px;outline:none;}" +
     ".textRow input:focus{border-color:" + ACCENT + ";}" +
     ".sendBtn{background:" + ACCENT + ";color:#fff;border:none;border-radius:20px;" +
     "padding:0 16px;font-size:13.5px;font-weight:600;cursor:pointer;}" +
     ".sendBtn:disabled{opacity:0.5;cursor:default;}" +
     ".smsFallback{margin-top:8px;font-size:11.5px;color:#888;text-align:center;}" +
-    ".smsFallback a{color:" + ACCENT + ";text-decoration:none;font-weight:600;}";
+    ".smsFallback a{color:" + ACCENT + ";text-decoration:none;font-weight:600;}" +
+    // On phones a small floating card is cramped and, combined with the
+    // on-screen keyboard, is what was overlapping the browser's own UI in
+    // the screenshots. Below 480px the panel instead takes over the full
+    // screen like a standard mobile chat sheet; JS sets an explicit inline
+    // height (see syncPanelHeight below) so it tracks the visual viewport
+    // instead of the keyboard shoving it around. This block is placed last
+    // so its rules win the cascade over the base .panel/.header/.footer
+    // rules above wherever they overlap (e.g. padding shorthand).
+    "@media (max-width:480px){" +
+    ".panel{left:0;right:0;bottom:0;top:0;width:100%;max-width:100%;" +
+    "height:100%;max-height:none;border-radius:0;}" +
+    ".header{padding-top:calc(14px + env(safe-area-inset-top));}" +
+    ".footer{padding-bottom:calc(10px + env(safe-area-inset-bottom));}" +
+    "}";
   shadow.appendChild(style);
 
   var launcher = document.createElement("button");
@@ -279,16 +298,40 @@
     );
   }
 
+  // On phones the panel goes full-screen (see the max-width:480px rule
+  // above), so the launcher pill behind it serves no purpose while open —
+  // leaving it visible is what was peeking out from behind/under the panel
+  // in the screenshots. Hide it whenever the panel is open, on any size.
+  var isMobile = window.matchMedia && window.matchMedia("(max-width:480px)").matches;
+
+  // iOS/Android don't shrink `100vh`/fixed elements to make room for the
+  // on-screen keyboard — the panel just gets covered instead. When the
+  // visualViewport API is available, pin the panel's actual height to it so
+  // the footer (input + send button) always stays above the keyboard.
+  function syncPanelHeight() {
+    if (!isMobile || panel.classList.contains("hidden")) return;
+    if (window.visualViewport) {
+      panel.style.height = window.visualViewport.height + "px";
+    }
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", syncPanelHeight);
+  }
+
   function openPanel() {
     panel.classList.remove("hidden");
+    launcher.classList.add("hidden");
     launcher.classList.remove("hasUnread");
     setPanelOpenStored(true);
     if (!opened) showGreeting();
+    syncPanelHeight();
     input.focus();
   }
   function closePanel() {
     panel.classList.add("hidden");
+    launcher.classList.remove("hidden");
     setPanelOpenStored(false);
+    panel.style.height = "";
   }
 
   launcher.addEventListener("click", function () {
@@ -357,7 +400,9 @@
         }
         if (isPanelOpenStored()) {
           panel.classList.remove("hidden");
+          launcher.classList.add("hidden");
           if (!opened) showGreeting();
+          syncPanelHeight();
         }
       })
       .catch(function () {
@@ -366,7 +411,9 @@
         // stranded — they'll just see a fresh greeting instead of history.
         if (isPanelOpenStored()) {
           panel.classList.remove("hidden");
+          launcher.classList.add("hidden");
           if (!opened) showGreeting();
+          syncPanelHeight();
         }
       });
   }
