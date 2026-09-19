@@ -171,17 +171,45 @@ code and stderr for each of the three cases.
 - Shadow DOM isolation is unchanged — nothing about either addition
   touches how the widget's markup/styles are isolated from the host page.
 
-## Dependency note
+## Dependency note (and the deploy failure it caused)
 
-`better-sqlite3` was bumped from `^11.3.0` to `^13.0.3` (matching
-concierge-platform's own pinned version) specifically because the older
-version has no prebuilt binary for this Node/OS combination and falls back
-to compiling from source via node-gyp, which needs a working Python
-toolchain — a real deploy-environment risk, not just a local dev
-inconvenience, since Render's build environment could hit the exact same
-gap. The newer version ships prebuilds and needs no native compile step at
-all. No API changes were needed anywhere in this codebase — better-sqlite3
-keeps its synchronous API stable across these versions.
+`better-sqlite3` was originally bumped from `^11.3.0` to `^13.0.3`
+(matching concierge-platform's own pinned version at the time) because the
+older version has no prebuilt binary for this local dev machine's Node/OS
+combination and falls back to compiling from source via node-gyp, which
+needs a working Python toolchain that wasn't available here. That reasoning
+only checked the local dev environment, though — **it never checked
+against the Render service's own pinned Node version, and `^13.0.3` broke
+the actual production deploy as a result.**
+
+better-sqlite3 `13.0.0`+ declares `"engines": { "node": ">=22" }` — this
+repo's own `package.json` (`"engines": { "node": "20.x" }`) and `.nodeversion`
+file pin Render to Node 20.x, which is what its build actually provisions.
+`npm install` doesn't hard-fail on an engines mismatch by default, but the
+mismatch is real: the deployed process either failed at install/require
+time or never came up cleanly, which is what Render reported as a failed
+deploy on this commit. **This was found only after the deploy actually
+failed on Render, not caught locally** — this repo's own dev machine runs
+Node 24, so a plain `npm install && npm test` here never exercises the
+Node-20 path Render's build actually uses, and nothing in this repo's own
+`npm test`/`typecheck` run touches engine compatibility at all.
+
+**Fixed by pinning `better-sqlite3` to `^12.11.1`** instead of `^13.x` —
+the last line before the `>=22` requirement, and one that explicitly
+declares support for `"20.x || 22.x || 23.x || 24.x || 25.x || 26.x"`
+(checked directly against the published package's own `engines` field, not
+assumed), so it matches Render's actual pinned Node 20.x while still
+installing from a real prebuild (no node-gyp/Python fallback) on this dev
+machine's Node 24 — verified by a clean reinstall here, `28/28` tests still
+passing, and a clean `typecheck`. No API changes were needed either way —
+better-sqlite3 keeps its synchronous API stable across all of 11.x/12.x/13.x.
+
+**The general lesson:** a native-dependency version bump chosen to fix one
+environment's install problem has to be checked against every environment
+that will actually run it, not just the one that was broken at the time —
+"prebuilds exist for my machine" and "this version's own declared engine
+range covers the deploy target" are two different claims, and only the
+first one was checked the first time.
 
 ## Test results
 
@@ -191,10 +219,16 @@ own test runner, not a maintained list): **28/28 passing**, in ~2 seconds,
 with zero real network calls to Anthropic, Twilio, or Stripe anywhere in
 the suite (every model/SMS/Stripe call a test path could reach is either
 mocked or steered into that service's own demo-mode fallback).
-`npm run typecheck`: clean.
+`npm run typecheck`: clean. Both re-confirmed clean after the
+better-sqlite3 downgrade above.
 
 ## Deploy
 
-Pushed to `main` — see the port report in concierge-platform
-(`docs/audits/real-demo-report.md`) for this repo's commit hash and
-confirmation that Render redeployed it.
+First push (`9d8907943fd5db7bed7184b089584e84e6ad6a54`) failed on Render —
+see "Dependency note (and the deploy failure it caused)" above for the
+root cause (better-sqlite3 `13.x` requiring Node `>=22` against this
+service's own Node 20.x pin) and the fix (downgrading to `^12.11.1`, which
+supports both). Fixed and re-pushed to `main` — see the port report in
+concierge-platform (`docs/audits/real-demo-report.md`) for this repo's
+follow-up commit hash and confirmation that Render redeployed it
+successfully this time.
