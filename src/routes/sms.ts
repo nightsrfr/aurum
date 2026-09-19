@@ -1,8 +1,32 @@
 import { Router } from "express";
+import twilio from "twilio";
+import { config } from "../config.js";
 import { runAgent } from "../agent/claude.js";
 import { sendSms } from "../services/twilio.js";
+import { loadConversation } from "../db.js";
+import { isMessageTooLong, tryStartSmsConversation, TOO_LONG_MESSAGE, RATE_LIMITED_MESSAGE } from "../agent/guards.js";
 
 export const smsRouter = Router();
+
+const EMPTY_TWIML = `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`;
+
+/**
+ * Confirms this request actually came from Twilio, not anyone who found
+ * the webhook URL. Twilio signs every webhook request with the account's
+ * auth token — `twilio.validateRequest` recomputes that signature from the
+ * exact URL Twilio would have POSTed to plus the parsed form body, and a
+ * mismatch means either the request is forged or BASE_URL/the URL Twilio
+ * has configured have drifted apart (a real request would then be
+ * indistinguishable from a forged one, which is exactly why this fails
+ * closed rather than warning and continuing).
+ */
+function isGenuineTwilioRequest(req: import("express").Request): boolean {
+  if (!config.twilio.authToken) return false;
+  const signature = req.headers["x-twilio-signature"];
+  if (typeof signature !== "string") return false;
+  const url = `${config.baseUrl}${req.originalUrl}`;
+  return twilio.validateRequest(config.twilio.authToken, signature, url, req.body as Record<string, string>);
+}
 
 /**
  * Twilio posts incoming SMS here as application/x-www-form-urlencoded
@@ -26,6 +50,11 @@ export const smsRouter = Router();
  * take 2 seconds or 20 and the guest still always gets their reply.
  */
 smsRouter.post("/webhook/sms", async (req, res) => {
+  if (!isGenuineTwilioRequest(req)) {
+    console.error("Rejected /webhook/sms request with an invalid or missing X-Twilio-Signature.");
+    return res.status(403).send("Invalid signature");
+  }
+
   const from = req.body.From as string;
   const body = (req.body.Body as string) ?? "";
 
@@ -33,7 +62,18 @@ smsRouter.post("/webhook/sms", async (req, res) => {
 
   // Acknowledge receipt right away — nothing here waits on the agent, so
   // Twilio's response-time window is never in play.
-  res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+  res.type("text/xml").send(EMPTY_TWIML);
+
+  if (isMessageTooLong(body)) {
+    await sendSms(from, TOO_LONG_MESSAGE).catch((err) => console.error("Failed to send too-long SMS reply:", err));
+    return;
+  }
+
+  const isNewConversation = loadConversation(from).length === 0;
+  if (isNewConversation && !tryStartSmsConversation(from)) {
+    await sendSms(from, RATE_LIMITED_MESSAGE).catch((err) => console.error("Failed to send rate-limit SMS reply:", err));
+    return;
+  }
 
   try {
     const reply = await runAgent(from, body);

@@ -53,4 +53,40 @@ export const config = {
   // fully locked out (see routes/admin.ts) rather than falling back to an
   // insecure default — you must set this explicitly before /admin works.
   adminPassword: env("ADMIN_PASSWORD", ""),
+
+  // Cost/abuse guards — see docs/audits/aurum-hardening-report.md. This app
+  // is a public marketing demo, not a real venue's paid product; these
+  // numbers are deliberately generous backstops against runaway spend, not
+  // a product limit.
+  maxMessageLength: 800,
+  maxConversationTurns: 25,
+  newWebConversationsPerIpPerHour: 5,
+  newSmsConversationsPerPhonePerHour: 5,
+  demoDailyModelCalls: Number(env("DEMO_DAILY_MODEL_CALLS", "2000")),
+
+  // The origins allowed to call /api/chat, /api/chat/history, and
+  // /api/chat/stream from a browser — the marketing sites that actually
+  // embed this widget, plus localhost for local development. Twilio/Stripe
+  // webhooks are server-to-server calls with no Origin header and are
+  // unaffected by this — see server.ts.
+  allowedChatOrigins: [
+    "https://concierge-platform.onrender.com",
+    "https://afterset.ai",
+    "https://www.afterset.ai",
+  ],
 };
+
+// This is a public, unauthenticated demo instance embedded on a marketing
+// site — it must never be able to move real money. Refusing to start with a
+// live secret key is a hard stop, not a warning: a demo running with live
+// keys is exactly the "nothing in the demo may take real money" guarantee
+// broken, and failing loudly at boot is far safer than hoping every code
+// path that touches Stripe remembers to check this itself.
+if (config.stripe.secretKey.startsWith("sk_live_")) {
+  console.error(
+    "FATAL: STRIPE_SECRET_KEY is a live-mode key (starts with sk_live_). " +
+      "This app is a public demo and must never be able to charge a real card. " +
+      "Use a test-mode key (sk_test_...) or leave it unset to run the demo pay page."
+  );
+  process.exit(1);
+}

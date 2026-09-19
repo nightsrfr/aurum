@@ -4,7 +4,7 @@ import { config } from "../config.js";
 import { countActiveBookings, createBooking, createFlag, listTablesConfig, updateBooking } from "../db.js";
 import { createPaymentLink } from "../services/stripe.js";
 
-type Table = { id: string; name: string; capacity: number; minSpend: number; description: string };
+type Table = { id: string; name: string; capacity: number; minSpend: number; deposit: number; description: string };
 
 // Read fresh from the DB on every call (not cached) so a table edited or
 // added in the admin Settings tab is usable immediately.
@@ -14,6 +14,7 @@ function getTables(): Table[] {
     name: t.name,
     capacity: t.capacity,
     minSpend: t.min_spend,
+    deposit: t.deposit,
     description: t.description,
   }));
 }
@@ -84,6 +85,7 @@ export async function runTool(name: string, input: any, channelId: string): Prom
           name: t.name,
           capacity: t.capacity,
           minSpend: t.minSpend,
+          deposit: t.deposit,
           remaining_tonight: remaining,
           fits_party: party_size ? t.capacity >= party_size : true,
         };
@@ -103,7 +105,12 @@ export async function runTool(name: string, input: any, channelId: string): Prom
       }
 
       const bookingId = randomUUID();
-      const amountCents = table.minSpend * 100;
+      // Charges the DEPOSIT, not the full minimum spend — credited against
+      // the minimum on the night (see venue_settings.paymentPolicy). The
+      // full minimum is still recorded (min_spend_cents) purely for
+      // display on the pay page/receipt; it is never charged directly.
+      const depositCents = table.deposit * 100;
+      const minSpendCents = table.minSpend * 100;
 
       createBooking({
         id: bookingId,
@@ -112,7 +119,8 @@ export async function runTool(name: string, input: any, channelId: string): Prom
         date,
         party_size,
         table_id,
-        amount_cents: amountCents,
+        amount_cents: depositCents,
+        min_spend_cents: minSpendCents,
         status: "pending_payment",
         payment_url: null,
         stripe_session_id: null,
@@ -121,8 +129,8 @@ export async function runTool(name: string, input: any, channelId: string): Prom
 
       const payment = await createPaymentLink({
         bookingId,
-        amountCents,
-        description: `${table.name} - ${date} - ${config.venueName}`,
+        amountCents: depositCents,
+        description: `${table.name} deposit - ${date} - ${config.venueName}`,
         customerPhone: phone,
       });
 
@@ -137,7 +145,9 @@ export async function runTool(name: string, input: any, channelId: string): Prom
         table_name: table.name,
         date,
         party_size,
-        amount_usd: table.minSpend,
+        min_spend_usd: table.minSpend,
+        deposit_usd: table.deposit,
+        balance_usd: table.minSpend - table.deposit,
         payment_url: payment.url,
       };
     }

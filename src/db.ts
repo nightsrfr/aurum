@@ -62,7 +62,11 @@ db.exec(`
   );
 
   -- Table inventory/pricing, editable from the admin Settings tab. Seeded
-  -- once below from data/tables.json.
+  -- once below from data/tables.json. "deposit" (added after initial
+  -- launch — see addColumnIfMissing below) is what start_booking actually
+  -- charges; min_spend is quoted as the minimum the table needs to spend
+  -- on the night, with the deposit credited against it. Both are whole
+  -- dollars, matching min_spend's own existing convention.
   CREATE TABLE IF NOT EXISTS tables_config (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -70,6 +74,17 @@ db.exec(`
     min_spend INTEGER NOT NULL,
     description TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- One row per calendar day (America/New_York, matching the venue's own
+  -- "today" — see agent/systemPrompt.ts's todayString()), counting every
+  -- real Anthropic API call made that day across every conversation. This
+  -- is the global daily cost backstop (DEMO_DAILY_MODEL_CALLS) — see
+  -- agent/guards.ts. Persisted (not just an in-memory counter) so a Render
+  -- restart mid-day doesn't quietly reset the cap.
+  CREATE TABLE IF NOT EXISTS model_call_counters (
+    day TEXT PRIMARY KEY,
+    count INTEGER NOT NULL DEFAULT 0
   );
 
   -- Marks which assistant-turns in a conversation were typed by a staff
@@ -106,6 +121,14 @@ function addColumnIfMissing(table: string, columnDef: string) {
 }
 addColumnIfMissing("bookings", "channel_id TEXT");
 addColumnIfMissing("staff_message_markers", "source TEXT NOT NULL DEFAULT 'staff'");
+addColumnIfMissing("tables_config", "deposit INTEGER");
+// The full minimum spend at the moment of booking, kept only for display
+// (the pay page's "minimum / deposit / balance" breakdown) — amount_cents
+// is what's actually charged (the deposit) and is what Stripe/the demo
+// pay page use for the real payment amount. Nullable because bookings
+// created before this column existed have none; the pay page falls back
+// to the table's own current min_spend for those.
+addColumnIfMissing("bookings", "min_spend_cents INTEGER");
 
 // ---- One-time seeding --------------------------------------------------
 
@@ -117,9 +140,9 @@ const DEFAULT_VENUE_SETTINGS: Record<string, string> = {
   arrivalPolicy:
     "Tables are held until 11:30pm. If a guest is running late, tell them to text and let us know — we'll do our best to hold it, but can't guarantee it after that time.",
   paymentPolicy:
-    "The minimum spend amount is charged in full when the guest completes the payment link, and it's applied as a credit toward whatever they order that night — frame it as prepaying their tab, not an extra fee on top.",
+    "Booking a table only requires a deposit — usually 25% of the table's minimum spend, rounded to the nearest $50 — charged when the guest completes the payment link. The deposit is credited against the table's minimum spend for the night; the remaining balance is settled at the table.",
   cancellationPolicy:
-    "Cancellations made 48+ hours before the reservation date get a full refund. Inside 48 hours, the minimum spend is non-refundable, but we're happy to help reschedule to another available night instead.",
+    "Cancellations made 48+ hours before the reservation date get the deposit refunded in full. Inside 48 hours, the deposit is non-refundable, but we're happy to help reschedule to another available night instead.",
   walkInPolicy:
     "Guests without a table reservation are welcome as walk-ins on a first-come, first-served basis with a cover charge at the door (cover varies by night). VIP tables are reserved in advance through this text line only.",
   largeGroupPolicy:
@@ -141,12 +164,44 @@ function seedVenueSettingsIfEmpty() {
 }
 seedVenueSettingsIfEmpty();
 
+// ---- Deposit rollout: migrate an already-seeded live database, not just
+// fresh installs ------------------------------------------------------
+//
+// seedVenueSettingsIfEmpty() above only ever fires on a genuinely empty
+// table — it does nothing for a database (like the live Render one) that
+// was already seeded under the old "full minimum, non-refundable" wording.
+// Comparing against the exact old default text (not blindly overwriting)
+// means a venue's own custom edit to either field is never clobbered —
+// only the untouched, still-default old wording gets migrated.
+const OLD_PAYMENT_POLICY =
+  "The minimum spend amount is charged in full when the guest completes the payment link, and it's applied as a credit toward whatever they order that night — frame it as prepaying their tab, not an extra fee on top.";
+const OLD_CANCELLATION_POLICY =
+  "Cancellations made 48+ hours before the reservation date get a full refund. Inside 48 hours, the minimum spend is non-refundable, but we're happy to help reschedule to another available night instead.";
+
+function migrateDepositPolicyTextIfUnedited() {
+  const row = (key: string) => db.prepare(`SELECT value FROM venue_settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  const payment = row("paymentPolicy");
+  if (payment && payment.value === OLD_PAYMENT_POLICY) {
+    setVenueSetting("paymentPolicy", DEFAULT_VENUE_SETTINGS.paymentPolicy);
+  }
+  const cancellation = row("cancellationPolicy");
+  if (cancellation && cancellation.value === OLD_CANCELLATION_POLICY) {
+    setVenueSetting("cancellationPolicy", DEFAULT_VENUE_SETTINGS.cancellationPolicy);
+  }
+}
+migrateDepositPolicyTextIfUnedited();
+
+/** 25% of the minimum, rounded to the nearest $50 — e.g. a $2,000 minimum defaults to a $500 deposit. */
+export function defaultDepositForMinSpend(minSpendDollars: number): number {
+  return Math.round((minSpendDollars * 0.25) / 50) * 50;
+}
+
 function seedTablesConfigIfEmpty() {
   const { c } = db.prepare(`SELECT COUNT(*) as c FROM tables_config`).get() as { c: number };
   if (c > 0) return;
   const insert = db.prepare(
-    `INSERT INTO tables_config (id, name, capacity, min_spend, description, sort_order)
-     VALUES (@id, @name, @capacity, @min_spend, @description, @sort_order)`
+    `INSERT INTO tables_config (id, name, capacity, min_spend, description, sort_order, deposit)
+     VALUES (@id, @name, @capacity, @min_spend, @description, @sort_order, @deposit)`
   );
   const tx = db.transaction((rows: any[]) => {
     for (const row of rows) insert.run(row);
@@ -159,10 +214,29 @@ function seedTablesConfigIfEmpty() {
       min_spend: t.minSpend,
       description: t.description,
       sort_order: i,
+      deposit: t.deposit ?? defaultDepositForMinSpend(t.minSpend),
     }))
   );
 }
 seedTablesConfigIfEmpty();
+
+// Backfills `deposit` for any row that predates the column (added via
+// addColumnIfMissing above) — a live database's existing tables_config
+// rows all have deposit = NULL right after this migration first runs,
+// which would otherwise charge $0 on their very next booking.
+function backfillMissingDeposits() {
+  const rows = db.prepare(`SELECT id, min_spend FROM tables_config WHERE deposit IS NULL`).all() as {
+    id: string;
+    min_spend: number;
+  }[];
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE tables_config SET deposit = ? WHERE id = ?`);
+  const tx = db.transaction(() => {
+    for (const row of rows) update.run(defaultDepositForMinSpend(row.min_spend), row.id);
+  });
+  tx();
+}
+backfillMissingDeposits();
 
 export type ConversationMessage = {
   role: "user" | "assistant";
@@ -318,7 +392,15 @@ export type Booking = {
   date: string;
   party_size: number;
   table_id: string;
+  // What's actually charged — the deposit, not the full minimum. See
+  // agent/tools.ts's start_booking.
   amount_cents: number;
+  // The full minimum spend at the time of booking, for display only (the
+  // pay page's minimum/deposit/balance breakdown) — never charged
+  // directly. Nullable because bookings created before this column
+  // existed have none; display code falls back to the table's current
+  // min_spend for those.
+  min_spend_cents: number | null;
   status: string;
   payment_url: string | null;
   stripe_session_id: string | null;
@@ -348,8 +430,8 @@ export function createBooking(booking: Omit<Booking, "created_at" | "updated_at"
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO bookings
-      (id, phone, guest_name, date, party_size, table_id, amount_cents, status, payment_url, stripe_session_id, channel_id, created_at, updated_at)
-     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @status, @payment_url, @stripe_session_id, @channel_id, @now, @now)`
+      (id, phone, guest_name, date, party_size, table_id, amount_cents, min_spend_cents, status, payment_url, stripe_session_id, channel_id, created_at, updated_at)
+     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @min_spend_cents, @status, @payment_url, @stripe_session_id, @channel_id, @now, @now)`
   ).run({ ...booking, now });
 }
 
@@ -470,6 +552,9 @@ export type TableConfig = {
   name: string;
   capacity: number;
   min_spend: number;
+  // Whole dollars, same convention as min_spend — what start_booking
+  // actually charges, credited against min_spend on the night.
+  deposit: number;
   description: string;
   sort_order: number;
 };
@@ -480,12 +565,13 @@ export function listTablesConfig(): TableConfig[] {
 
 export function upsertTableConfig(t: TableConfig): void {
   db.prepare(
-    `INSERT INTO tables_config (id, name, capacity, min_spend, description, sort_order)
-     VALUES (@id, @name, @capacity, @min_spend, @description, @sort_order)
+    `INSERT INTO tables_config (id, name, capacity, min_spend, deposit, description, sort_order)
+     VALUES (@id, @name, @capacity, @min_spend, @deposit, @description, @sort_order)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        capacity = excluded.capacity,
        min_spend = excluded.min_spend,
+       deposit = excluded.deposit,
        description = excluded.description,
        sort_order = excluded.sort_order`
   ).run(t);
@@ -493,4 +579,28 @@ export function upsertTableConfig(t: TableConfig): void {
 
 export function deleteTableConfig(id: string): void {
   db.prepare(`DELETE FROM tables_config WHERE id = ?`).run(id);
+}
+
+// ---- Global daily model-call cap (see agent/guards.ts) --------------------
+
+/** America/New_York calendar date, matching agent/systemPrompt.ts's own "today" — the demo's day boundary is the venue's, not UTC's. */
+function currentDemoDay(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+/** Increments today's model-call count and returns the new total — one row per day, created on first use. */
+export function incrementDailyModelCallCount(): number {
+  const day = currentDemoDay();
+  db.prepare(
+    `INSERT INTO model_call_counters (day, count) VALUES (?, 1)
+     ON CONFLICT(day) DO UPDATE SET count = count + 1`
+  ).run(day);
+  return (db.prepare(`SELECT count FROM model_call_counters WHERE day = ?`).get(day) as { count: number }).count;
+}
+
+/** Read-only peek at today's count, without incrementing — used by guards.ts to decide before ever calling the model. */
+export function getDailyModelCallCount(): number {
+  const day = currentDemoDay();
+  const row = db.prepare(`SELECT count FROM model_call_counters WHERE day = ?`).get(day) as { count: number } | undefined;
+  return row?.count ?? 0;
 }

@@ -19,6 +19,7 @@ import {
   listTablesConfig,
   upsertTableConfig,
   deleteTableConfig,
+  defaultDepositForMinSpend,
 } from "../db.js";
 import { sendSms } from "../services/twilio.js";
 import { publish } from "../services/liveUpdates.js";
@@ -260,17 +261,23 @@ adminRouter.post("/admin/api/settings/tables", requireAdminApi, (req, res) => {
     name?: string;
     capacity?: number;
     min_spend?: number;
+    deposit?: number;
     description?: string;
     sort_order?: number;
   };
   if (!t.id || !t.name || typeof t.capacity !== "number" || typeof t.min_spend !== "number" || !t.description) {
     return res.status(400).json({ error: "id, name, capacity, min_spend, and description are required" });
   }
+  // deposit is optional on input (existing callers/scripts that don't know
+  // about it yet still work) but always stored as a real number — falls
+  // back to the same 25%-rounded-to-$50 default a brand-new table gets.
+  const deposit = typeof t.deposit === "number" ? t.deposit : defaultDepositForMinSpend(t.min_spend);
   upsertTableConfig({
     id: t.id,
     name: t.name,
     capacity: t.capacity,
     min_spend: t.min_spend,
+    deposit,
     description: t.description,
     sort_order: t.sort_order ?? 0,
   });

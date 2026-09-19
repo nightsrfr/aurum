@@ -1,9 +1,35 @@
 import { Router } from "express";
+import cors from "cors";
+import { config } from "../config.js";
 import { runAgent } from "../agent/claude.js";
-import { getConversationTranscript } from "../db.js";
+import { getConversationTranscript, loadConversation } from "../db.js";
 import { subscribe } from "../services/liveUpdates.js";
+import { isMessageTooLong, tryStartWebConversation, TOO_LONG_MESSAGE, RATE_LIMITED_MESSAGE } from "../agent/guards.js";
 
 export const chatRouter = Router();
+
+// Scoped to just this router's routes (not applied globally in server.ts)
+// so the Twilio/Stripe webhooks — server-to-server calls with no Origin
+// header, unaffected by CORS either way — are never accidentally coupled
+// to this allowlist. Browsers preflight cross-origin requests against
+// whatever origin list this reports; a non-browser client (curl, a
+// script) ignores CORS entirely, so this is a defense against a hostile
+// third-party site quietly draining the demo's daily model-call budget
+// through a visitor's own browser, not a hard security boundary on its own.
+chatRouter.use(
+  cors({
+    origin(origin, callback) {
+      // No Origin header at all (curl, server-to-server, same-origin) —
+      // let it through; this isn't the layer that's supposed to stop that.
+      if (!origin) return callback(null, true);
+      if (config.allowedChatOrigins.includes(origin)) return callback(null, true);
+      if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
+  })
+);
 
 /**
  * Backend for the website chat widget. The widget generates a random
@@ -23,8 +49,20 @@ chatRouter.post("/api/chat", async (req, res) => {
   if (!message || typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "Missing message" });
   }
+  if (isMessageTooLong(message)) {
+    return res.status(400).json({ reply: TOO_LONG_MESSAGE });
+  }
 
   const channelId = `web:${sessionId}`;
+
+  // Rate-limit only the START of a new conversation (no history yet) —
+  // an already-started conversation's later messages are never blocked
+  // here, same reasoning as the guest concierge's own turn cap: someone
+  // mid-conversation isn't the abuse pattern this guards against.
+  const isNewConversation = loadConversation(channelId).length === 0;
+  if (isNewConversation && !tryStartWebConversation(req.ip ?? "unknown")) {
+    return res.status(429).json({ reply: RATE_LIMITED_MESSAGE });
+  }
 
   try {
     const reply = await runAgent(channelId, message.trim());

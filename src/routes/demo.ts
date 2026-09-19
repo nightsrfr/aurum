@@ -2,6 +2,7 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { getBooking } from "../db.js";
 import { confirmBooking } from "./stripeWebhook.js";
+import { bookingPaymentSummaryHtml } from "./paymentSummary.js";
 
 /**
  * Lets you test the entire booking + payment + confirmation-SMS flow
@@ -41,9 +42,7 @@ demoRouter.get("/demo/pay/:bookingId", (req, res) => {
   res.type("html").send(`
     <html>
       <body style="font-family: sans-serif; max-width: 420px; margin: 60px auto;">
-        <h2>${booking.table_id} — ${booking.date}</h2>
-        <p>Party of ${booking.party_size} under "${booking.guest_name}"</p>
-        <p><strong>Minimum spend due: $${(booking.amount_cents / 100).toFixed(2)}</strong></p>
+        ${bookingPaymentSummaryHtml(booking)}
         <p style="color:#888">This is a DEMO payment page (no Stripe account configured yet).</p>
         <form method="POST" action="/demo/pay/${booking.id}/confirm">
           <button style="padding:12px 20px;font-size:16px;">Confirm Payment (Demo)</button>

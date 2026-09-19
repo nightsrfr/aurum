@@ -4,6 +4,7 @@
     "name": "Lounge Table",
     "capacity": 4,
     "minSpend": 500,
+    "deposit": 150,
     "description": "Semi-private lounge table. Great for small groups who want table service without the full VIP price tag."
   },
   {
@@ -11,6 +12,7 @@
     "name": "VIP Table",
     "capacity": 6,
     "minSpend": 1200,
+    "deposit": 300,
     "description": "Elevated VIP table with a dedicated server and a premium view of the DJ booth."
   },
   {
@@ -18,6 +20,7 @@
     "name": "VIP Booth",
     "capacity": 10,
     "minSpend": 2500,
+    "deposit": 650,
     "description": "Large private booth, ideal for bigger groups, birthdays, and celebrations."
   },
   {
@@ -25,6 +28,7 @@
     "name": "Skybox",
     "capacity": 15,
     "minSpend": 5000,
+    "deposit": 1250,
     "description": "Our most exclusive space: a private skybox overlooking the main floor with its own dedicated host."
   }
 ]

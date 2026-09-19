@@ -680,12 +680,14 @@
     }
     el.innerHTML = '<div class="table-row-edit" style="border-bottom:1px solid var(--border);padding-bottom:6px;">' +
       '<span class="col-label">Name</span><span class="col-label">Capacity</span><span class="col-label">Min spend ($)</span>' +
+      '<span class="col-label">Deposit ($)</span>' +
       '<span class="col-label">Description</span><span class="col-label">Order</span><span></span></div>' +
       currentTables.map(function (t, i) {
         return '<div class="table-row-edit" data-index="' + i + '">' +
           '<input data-field="name" value="' + escapeHtml(t.name) + '">' +
           '<input data-field="capacity" type="number" value="' + t.capacity + '">' +
           '<input data-field="min_spend" type="number" value="' + t.min_spend + '">' +
+          '<input data-field="deposit" type="number" value="' + t.deposit + '" title="Charged to book; credited against min spend">' +
           '<textarea data-field="description">' + escapeHtml(t.description) + '</textarea>' +
           '<input data-field="sort_order" type="number" value="' + t.sort_order + '">' +
           '<div style="display:flex;flex-direction:column;gap:6px;">' +
@@ -704,6 +706,7 @@
           name: row.querySelector('[data-field="name"]').value,
           capacity: Number(row.querySelector('[data-field="capacity"]').value),
           min_spend: Number(row.querySelector('[data-field="min_spend"]').value),
+          deposit: Number(row.querySelector('[data-field="deposit"]').value),
           description: row.querySelector('[data-field="description"]').value,
           sort_order: Number(row.querySelector('[data-field="sort_order"]').value),
         };
@@ -733,6 +736,7 @@
       name: name,
       capacity: 6,
       min_spend: 300,
+      deposit: 100,
       description: "",
       sort_order: currentTables.length,
     };

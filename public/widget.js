@@ -14,6 +14,17 @@
  * data-phone: optional. Shown as a "prefer to text?" fallback link.
  * data-venue-name: optional. Shown in the chat header. Defaults to "Book a Table".
  * data-accent-color: optional. Hex color for the launcher/buttons. Defaults to "#c81845".
+ * data-launcher: optional. Set to "none" to skip rendering the floating
+ *   launcher button entirely — for an embedding page that wants to open the
+ *   chat itself (e.g. from its own "Try it" buttons) via window.AftersetDemo
+ *   below, rather than showing a second floating button next to its own UI.
+ *
+ * window.AftersetDemo — exposed once this script runs, regardless of
+ * data-launcher:
+ *   .open(prefill)  Opens the panel. `prefill` (optional string) is placed
+ *                    in the input box, ready to send, not sent automatically
+ *                    — the guest still presses send/Enter themselves.
+ *   .close()         Closes the panel.
  *
  * This file is intentionally dependency-free vanilla JS so it can be
  * dropped into any website regardless of what framework (or none) that
@@ -39,6 +50,7 @@
   var PHONE = scriptEl.dataset.phone || "";
   var VENUE_NAME = scriptEl.dataset.venueName || "Book a Table";
   var ACCENT = scriptEl.dataset.accentColor || "#c81845";
+  var LAUNCHER_MODE = scriptEl.dataset.launcher || "default";
 
   if (!API_BASE) {
     console.error("[nightsrfr-widget] Missing required data-api-base attribute.");
@@ -198,7 +210,13 @@
   launcher.className = "launcher";
   launcher.type = "button";
   launcher.textContent = "💬 Book a Table";
-  shadow.appendChild(launcher);
+  // data-launcher="none": the embedding page opens the panel itself via
+  // window.AftersetDemo.open() (see openPanel()/closePanel() below, which
+  // still work identically either way) — never render a second floating
+  // button next to whatever "Try it" UI that page already has.
+  if (LAUNCHER_MODE !== "none") {
+    shadow.appendChild(launcher);
+  }
 
   var panel = document.createElement("div");
   panel.className = "panel hidden";
@@ -368,6 +386,21 @@
     else closePanel();
   });
   closeBtn.addEventListener("click", closePanel);
+
+  // Public API for a page that embeds this widget with data-launcher="none"
+  // and drives opening it from its own buttons instead. Exposed
+  // unconditionally (not just when data-launcher="none") since there's no
+  // harm in also letting a page with the default floating launcher open
+  // the panel programmatically too.
+  window.AftersetDemo = {
+    open: function (prefill) {
+      openPanel();
+      if (typeof prefill === "string" && prefill && input) {
+        input.value = prefill;
+      }
+    },
+    close: closePanel,
+  };
 
   var sending = false;
   function send() {

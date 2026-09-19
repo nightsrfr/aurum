@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { getBooking } from "../db.js";
 import { createEmbeddedCheckoutSession, getStripeClient } from "../services/stripe.js";
 import { widgetLoaderScript } from "./demo.js";
+import { bookingPaymentSummaryHtml } from "./paymentSummary.js";
 
 /**
  * The real (non-demo) payment page. Once STRIPE_SECRET_KEY is configured,
@@ -80,9 +81,7 @@ checkoutRouter.get("/pay/:bookingId", (req, res) => {
   res.type("html").send(
     paymentPage(`
       <div class="summary">
-        ${booking.table_id} — ${booking.date}
-        <br>Party of ${booking.party_size} under "${booking.guest_name}"
-        <strong>Minimum spend due: $${(booking.amount_cents / 100).toFixed(2)}</strong>
+        ${bookingPaymentSummaryHtml(booking)}
       </div>
       <div id="checkout-container"></div>
       <script src="https://js.stripe.com/v3/"></script>
