@@ -232,3 +232,222 @@ supports both). Fixed and re-pushed to `main` — see the port report in
 concierge-platform (`docs/audits/real-demo-report.md`) for this repo's
 follow-up commit hash and confirmation that Render redeployed it
 successfully this time.
+
+## Demo polish
+
+Covers "Demo polish" — a batch of gaps found on a full Claude-in-Chrome
+booking run once the hardened demo was actually live. Chat itself worked;
+these fix the specific rough edges that run turned up.
+
+### 1. Confirmation channel — consent, validation, and a real throttle
+
+The web widget used to ask every guest for a phone number up front and
+unconditionally text them a confirmation once payment succeeded — no
+consent, no validation (`"555-0100"`, seven digits with no area code at
+all, was accepted outright), and no way to choose email instead.
+
+**Consent flow.** `start_booking`'s `phone` field is no longer required on
+the web channel — a guest gives one later only if they choose to be
+texted. Right after `start_booking` succeeds, the system prompt
+(`agent/systemPrompt.ts`) instructs the model to ask "Want your
+confirmation by text or email?" — or, while `WEB_SMS_OPT_IN` is false (the
+default), "by email, or is right here in the chat fine?" with texting
+never mentioned as an option at all. A new tool,
+`set_confirmation_channel` (`agent/tools.ts`), is the only thing that ever
+records the guest's answer, and is excluded entirely from the SMS
+channel's own tool list (`getToolDefinitions("sms")` never includes it) —
+an SMS-channel guest is already texting from their own real number and
+keeps getting confirmed exactly as before, unaffected by any of this.
+
+**Validation** (`services/contactValidation.ts`): `normalizeUsPhone()`
+requires exactly 10 digits (an optional leading `1` stripped first),
+rejects an area code or exchange starting with 0/1, and specifically
+rejects NANPA's reserved-for-fiction `555-01XX` block regardless of area
+code — the exact shape of `"555-0100"`. `normalizeEmail()` is a
+deliberately simple sanity check, not full RFC 5322 validation. Both are
+unit-tested directly, including the exact `"555-0100"` regression case.
+
+**Disclosure and consent record.** When texting is offered, the system
+prompt requires the model to show this exact sentence before the guest
+answers: *"You'll get one text with your confirmation. Msg & data rates
+may apply. Reply STOP to opt out."* (`SMS_CONFIRMATION_DISCLOSURE`,
+`agent/guards.ts`). The moment a text confirmation is actually accepted
+(passed validation and both throttles below), `sms_consents`
+(`recordSmsConsent()`, `db.ts`) gets one row: phone, conversation id,
+timestamp, and the exact disclosure text shown — never recorded for a
+declined, invalid, or throttled attempt, since "opt-in" means the guest
+actually agreed to something that's actually going to happen.
+
+**Throttle — both halves enforced, both fixed rather than
+env-configurable, matching this file's own generous-backstop numbers.**
+Max 1 web-originated confirmation text per phone per 24h, checked by
+counting `sms_consents` rows for that phone in the last 24h (persisted,
+survives a restart — 24h is long enough that an in-memory bucket
+resetting on a Render restart would be a real gap). Max 3 per IP per hour,
+an in-memory bucket (`tryRecordWebSmsConfirmationByIp()`,
+`agent/guards.ts`) — same "in-memory is fine, this is a backstop, not a
+persistent limit" reasoning as every other rate limit on this page. Either
+throttle tripping — or `WEB_SMS_OPT_IN` being false, or an invalid
+phone/email — sets `confirmation_channel: "chat_only"` (except an invalid
+phone/email, which asks again instead of silently downgrading) rather than
+leaving the model to improvise a response to a bare error code.
+
+**Delivery — `stripeWebhook.ts`'s `confirmBooking()`.** A web booking now
+sends **exactly one** further message beyond the in-chat confirmation
+(always sent, regardless of channel): a text (ending with "Reply STOP to
+opt out.") if `confirmation_channel === "sms"`, an email via the new
+`services/email.ts` (Resend HTTP API, `RESEND_API_KEY`/`EMAIL_FROM`,
+same console-log demo-mode fallback as Twilio/Stripe) if `"email"`, or
+nothing further at all for `"chat_only"`/never-answered. **The bot must
+never say "we'll text you" unless that tool call actually returned success
+for "sms"** — both the system prompt's own instruction and the pay-page
+copy (`checkout.ts`, `demo.ts`) read the booking's real
+`confirmation_channel` back rather than presupposing one, replacing
+`confirmBooking()`'s old hardcoded "a confirmation text is on its way,"
+which used to fire regardless of whether a real phone even existed.
+
+**A real bug this feature's own tests caught, not just a fix for the
+brief:** `createBooking()`'s INSERT statement never included the new
+`confirmation_channel`/`confirmation_contact` columns at all — any value
+passed to it for those two fields was silently dropped, always persisting
+`NULL` regardless of what was passed in. Never manifested in production
+(the real flow always creates a booking with both null and sets them
+later via `updateBooking()`, which was already correct), but a direct
+test fixture that set them at creation time caught it immediately. Fixed
+by adding both columns to the INSERT column/value lists.
+
+Tests: `services/contactValidation.test.ts` (phone/email validation,
+including the exact `"555-0100"` case), `agent/tools.test.ts` (the
+`WEB_SMS_OPT_IN=false` default path — email success/failure, `"none"`,
+and `"sms"` refused outright regardless of the phone given),
+`agent/tools-sms-confirmation.test.ts` (a separate file/process, since
+`WEB_SMS_OPT_IN` is read once at config load — the `true` path's real
+validation, the consent row, and both throttles, including proving the
+phone throttle catches a repeat from a *different* IP and the IP throttle
+catches a *different* phone), and
+`routes/stripeWebhook-confirmation.test.ts` (`confirmBooking()`'s delivery
+logic end-to-end for all four channel states, plus confirming an
+SMS-channel booking is completely unaffected).
+
+### 2. Dates — same-day disambiguation and consistent restating
+
+When a guest names a weekday that IS today (e.g. "this Saturday" said on a
+Saturday), the system prompt now instructs the model to ask "Tonight, or
+next Saturday the [date]?" before quoting or booking, rather than
+guessing. Every date is restated as weekday + month + day (e.g. "Saturday,
+Sept 19") before `start_booking` is called, never a bare date the guest
+typed or a raw `YYYY-MM-DD` string. Both are prompt-level instructions,
+consistent with how every other date-relative resolution in this system
+already works (there is no code-side natural-language date parser
+anywhere in this repo) — not independently testable without a real model
+call, same limitation this file already notes for every other
+conversational-behavior instruction.
+
+### 3. Stated preferences
+
+Added an explicit instruction: when a guest states a preference ("near
+the DJ," "somewhere quiet"), the model must address it directly using
+what the table descriptions actually say, or say plainly that it doesn't
+have that detail rather than silently picking a table and ignoring the
+question. Same conversational-instruction caveat as above.
+
+### 4. Formatting — bold and links on web, plain text on SMS
+
+The web widget rendered literal `**asterisks**` — the model already used
+markdown-style emphasis in some replies, but `widget.js` only ever
+auto-linked URLs, never interpreted `**bold**`. `renderWithFormatting()`
+(`public/widget.js`) now splits on `**bold**` pairs and renders each
+segment (bold or plain) through the existing link-auto-linker — still
+entirely `document.createTextNode`-built, so this adds zero
+injection surface. Nothing else is interpreted (no headings, underscores,
+brackets, bullet dashes) — an unpaired asterisk or any other markdown
+syntax renders as plain literal text. The system prompt now tells the
+model explicitly what's safe to use on each channel: `**bold**` and plain
+links on web, strictly no markdown of any kind on SMS (Twilio delivers
+whatever text is sent completely unprocessed).
+
+Tests: `e2e/widget.spec.ts`'s new bold-rendering test, against the real
+`public/widget.js` in a real browser.
+
+### 5. Enter key
+
+**Checked directly, not assumed:** a real Playwright test
+(`e2e/widget.spec.ts`, new Playwright infra added to this repo
+specifically for this — `playwright.config.ts` spawns the real server) against the actual
+`public/widget.js` file shows Enter already sends correctly as the code
+was written. This test could not reproduce the reported failure in this
+environment (no way to run the same Claude-in-Chrome session that
+originally found it). Rather than claim a fix for a bug that couldn't be
+reproduced, two real, independently-justified hardening changes were
+still made to the handler: `e.preventDefault()` (cheap insurance against
+a host page's own keydown handling ever double-firing on the same
+keypress) and an `e.isComposing` guard (so committing an IME composition
+with Enter — CJK input methods, etc. — doesn't send a half-typed word).
+The regression test itself is the concrete artifact this item asked
+for regardless: `e2e/widget.spec.ts` now exercises the real file directly,
+closing the exact gap the brief named (concierge-platform's own e2e suite
+stubs this widget out entirely and never could have caught a bug here).
+
+### 6. Pay page
+
+`paymentSummary.ts`'s shared summary now uses `services/format.ts`'s
+`formatMoney()` (thousands-separated, always two decimals — `$2,500.00`,
+not `$2500.00`) and `formatDateLong()` (`"Saturday, Sept 19"`, parsed as
+plain year/month/day components rather than through `new Date("YYYY-MM-DD")`,
+which parses as UTC midnight and can render as the wrong day in a
+negative-UTC-offset timezone). `checkout.ts`/`demo.ts` both now render the
+venue name in `<title>` ("Pay your deposit — Salt & Vine") and as a
+heading at the top of the page.
+
+**No floating launcher on pay/return/demo-pay pages.** `widgetLoaderScript()`
+now sets `data-launcher="none"` on all of them, paired with a new
+`continueChatLink()` — a small inline "Questions? Continue the chat" link
+that calls `window.AftersetDemo.open()` — so the conversation stays one
+click away without a second floating button competing with a payment form
+or confirmation message.
+
+**The blank embedded-checkout box — diagnosed and given a real fallback,
+not just a longer error message.** The existing code already caught a
+missing `STRIPE_PUBLISHABLE_KEY` (checked server-side, `checkout.ts`) and
+a `Stripe(...)` constructor throwing (wrapped in try/catch) — but a
+publishable key that doesn't match the secret key's own Stripe account
+makes `stripe.initEmbeddedCheckout()`'s promise **hang indefinitely**
+rather than reject, which nothing existing ever caught: this is the
+literal "blank box" symptom. Fixed with a 6-second timeout that triggers
+the same fallback as every other failure path (script `onerror`, an init
+exception, a non-OK session response, a rejected promise) — a real,
+working "Confirm payment (demo)" button
+(`POST /pay/:bookingId/demo-confirm`, calling the exact same
+`confirmBooking()` the Stripe webhook calls) instead of an inert error
+paragraph. This is safe specifically *because* this app can only ever run
+with a test-mode or no Stripe key (`config.ts`'s `sk_live_` refusal) — a
+demo-style "confirm without a real charge" fallback is consistent with
+what this whole app already is, not a special case invented for this bug.
+**Not independently verified against a real Stripe test-mode account** —
+this dev environment has no live Stripe test credentials, so the embedded
+Checkout iframe's own real rendering (as opposed to the failure paths
+around it) couldn't be exercised end-to-end; the demo-pay page's own
+money/date/venue-name/no-launcher rendering WAS verified directly by
+running the server and creating a real booking (see the transcript in this
+session's own record).
+
+### 7. Widget panel sizing — `data-top-offset`
+
+`public/widget.js` reads a new `data-top-offset` attribute (pixels,
+default 0) and uses it in three places that all previously assumed a
+fixed 0: the desktop panel's `max-height` (`calc(100vh - TOP_OFFSET -
+24px)`, was a flat `calc(100vh - 120px)` guess), the mobile full-screen
+layout's `top`/`height` (`top: TOP_OFFSETpx` / `height: calc(100vh -
+TOP_OFFSETpx)`, was `top:0`/`height:100%` — a `height:100%` fixed element
+computes against the full viewport regardless of `top`, so this would
+otherwise overflow past the bottom of the screen by `TOP_OFFSET` px), and
+`syncPanelHeight()`'s on-screen-keyboard-aware inline height override
+(`visualViewport.height - TOP_OFFSET`, same overflow reasoning). Verified
+directly with a real Playwright test asserting the computed `max-height`
+against a real `data-top-offset="96"` attribute, not just read from the
+diff.
+
+Test results: **52/52 unit tests passing** (24 new: consent/throttle/
+validation/delivery), typecheck clean, **5/5 Playwright tests passing**
+against the real `public/widget.js` (3 from item 5's Enter-key
+verification + 2 new: bold rendering, `data-top-offset`).

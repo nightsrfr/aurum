@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { loadConversation, saveConversation, type ConversationMessage } from "../db.js";
 import { getSystemPrompt } from "./systemPrompt.js";
-import { toolDefinitions, runTool } from "./tools.js";
+import { getToolDefinitions, runTool } from "./tools.js";
 import { hasReachedTurnCap, tryConsumeDailyModelCall, TURN_CAP_MESSAGE, DAILY_CAP_MESSAGE } from "./guards.js";
 
 // Exported so tests can mock .messages.create directly instead of making a
@@ -18,7 +18,7 @@ const MAX_TOOL_ITERATIONS = 5;
  * with the booking tools, executes any tool calls Claude makes, and returns
  * the final text reply to send back over SMS.
  */
-export async function runAgent(phone: string, incomingText: string): Promise<string> {
+export async function runAgent(phone: string, incomingText: string, ip?: string): Promise<string> {
   const history = loadConversation(phone);
 
   // Turn cap — checked BEFORE the incoming message is even added to
@@ -61,7 +61,7 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
       model: config.claudeModel,
       max_tokens: 1024,
       system: getSystemPrompt(channel),
-      tools: toolDefinitions,
+      tools: getToolDefinitions(channel),
       messages,
     });
 
@@ -93,7 +93,7 @@ export async function runAgent(phone: string, incomingText: string): Promise<str
         (block.name === "start_booking" || block.name === "flag_for_human") && channel !== "web"
           ? { ...(block.input as any), phone }
           : block.input;
-      const result = await runTool(block.name, input, phone);
+      const result = await runTool(block.name, input, phone, ip);
       toolResults.push({
         type: "tool_result",
         tool_use_id: block.id,

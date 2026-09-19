@@ -4,7 +4,9 @@ import { config } from "../config.js";
 import { getStripeClient } from "../services/stripe.js";
 import { db, updateBooking, appendSystemMessage } from "../db.js";
 import { sendSms } from "../services/twilio.js";
+import { sendEmail } from "../services/email.js";
 import { publish } from "../services/liveUpdates.js";
+import { formatMoney } from "../services/format.js";
 
 export const stripeWebhookRouter = Router();
 
@@ -64,10 +66,10 @@ export async function confirmBooking(bookingId: string) {
   const isWeb = channelId.startsWith("web:");
 
   // `phone` is a real, textable number whenever this booking came from SMS
-  // (it's always the number they're texting from), or from the web widget
-  // AFTER the bot started asking guests for one during booking. It'll still
-  // be the non-phone "web:<uuid>" placeholder on any web booking made before
-  // that change — there's nothing real to text in that case.
+  // (it's always the number they're texting from). On the web widget it's
+  // never a real phone unless the guest is choosing to be texted their
+  // confirmation — see confirmation_channel/confirmation_contact below,
+  // which is the ONLY source of truth for a web booking's delivery choice.
   const hasRealPhone = Boolean(booking.phone) && !String(booking.phone).startsWith("web:");
 
   // What was actually just charged is the deposit (amount_cents) — the
@@ -81,15 +83,30 @@ export async function confirmBooking(bookingId: string) {
       | undefined;
     return table ? table.min_spend * 100 : booking.amount_cents;
   }
-  const balanceCents = Math.max(resolveMinSpendCents() - booking.amount_cents, 0);
+  const minSpendCents = resolveMinSpendCents();
+  const balanceCents = Math.max(minSpendCents - booking.amount_cents, 0);
   const balanceLine =
     balanceCents > 0
-      ? ` Your deposit is credited against the ${config.venueName} minimum — the remaining $${(balanceCents / 100).toFixed(2)} balance is settled at the table on the night.`
+      ? ` Your deposit is credited against the ${config.venueName} minimum — the remaining ${formatMoney(balanceCents)} balance is settled at the table on the night.`
       : "";
 
-  const message = hasRealPhone
-    ? `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}! A confirmation text is on its way to ${booking.phone} with all the details. Just give the door the name "${booking.guest_name}" and you're in.${balanceLine} We can't wait to see you — get ready for an unforgettable night!`
-    : `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}! Just give the door the name "${booking.guest_name}" and you're in.${balanceLine} We can't wait to see you — get ready for an unforgettable night!`;
+  // Never presuppose a delivery channel the guest didn't actually pick —
+  // "a confirmation text is on its way" used to be hardcoded here
+  // regardless of whether a real phone even existed, let alone whether the
+  // guest consented to being texted. An SMS-channel guest is unaffected by
+  // any of this (isWeb is false, so none of the branches below run) and
+  // keeps getting confirmed exactly as before.
+  const deliveryLine = isWeb
+    ? booking.confirmation_channel === "sms"
+      ? ` A confirmation text is on its way to ${booking.confirmation_contact}.`
+      : booking.confirmation_channel === "email"
+        ? ` A confirmation email is on its way to ${booking.confirmation_contact}.`
+        : "" // chat_only or never answered — say nothing extra; this message IS the confirmation
+    : hasRealPhone
+      ? ` A confirmation text is on its way to ${booking.phone} with all the details.`
+      : "";
+
+  const message = `🎉 Payment received — you're officially booked for ${booking.date} at ${config.venueName}!${deliveryLine} Just give the door the name "${booking.guest_name}" and you're in.${balanceLine} We can't wait to see you — get ready for an unforgettable night!`;
 
   // Drop the confirmation into the guest's actual chat, tagged as a system
   // message (not a normal bot reply) so the admin transcript can tell them
@@ -103,14 +120,37 @@ export async function confirmBooking(bookingId: string) {
     publish(channelId, { role: "assistant", text: message, source: "system" });
   }
 
-  // Independently of the chat channel, also text the guest's real phone
-  // whenever we actually have one — this is what makes "a confirmation text
-  // is on its way" literally true for a web-widget booking too, not just SMS.
-  if (hasRealPhone) {
+  if (!isWeb) {
+    // SMS-channel booking — unchanged behavior, always text the guest's own
+    // real number, exactly as this has always worked.
+    if (hasRealPhone) {
+      try {
+        await sendSms(booking.phone, message);
+      } catch (err) {
+        console.error(`Failed to send payment-confirmation SMS to ${booking.phone}:`, err);
+      }
+    }
+    return;
+  }
+
+  // Web-channel booking — the ONLY two cases that ever leave the chat: the
+  // guest explicitly opted into text (set_confirmation_channel, gated by
+  // config.webSmsOptIn and the consent throttles — see agent/tools.ts) or
+  // email. Anything else (declined both, never answered, throttled) sends
+  // nothing further — the chat message above already is the confirmation.
+  if (booking.confirmation_channel === "sms" && booking.confirmation_contact) {
     try {
-      await sendSms(booking.phone, message);
+      // Exactly one text, ending with the required opt-out line — this is
+      // the one and only SMS a web-originated confirmation ever sends.
+      await sendSms(booking.confirmation_contact, `${message} Reply STOP to opt out.`);
     } catch (err) {
-      console.error(`Failed to send payment-confirmation SMS to ${booking.phone}:`, err);
+      console.error(`Failed to send web-confirmation SMS to ${booking.confirmation_contact}:`, err);
+    }
+  } else if (booking.confirmation_channel === "email" && booking.confirmation_contact) {
+    try {
+      await sendEmail(booking.confirmation_contact, `Your ${config.venueName} booking confirmation`, message);
+    } catch (err) {
+      console.error(`Failed to send web-confirmation email to ${booking.confirmation_contact}:`, err);
     }
   }
 }

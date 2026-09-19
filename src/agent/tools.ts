@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
-import { countActiveBookings, createBooking, createFlag, listTablesConfig, updateBooking } from "../db.js";
+import {
+  countActiveBookings,
+  countRecentSmsConsents,
+  createBooking,
+  createFlag,
+  getBooking,
+  listTablesConfig,
+  recordSmsConsent,
+  updateBooking,
+} from "../db.js";
 import { createPaymentLink } from "../services/stripe.js";
+import { normalizeEmail, normalizeUsPhone } from "../services/contactValidation.js";
+import { SMS_CONFIRMATION_DISCLOSURE, tryRecordWebSmsConfirmationByIp } from "./guards.js";
 
 type Table = { id: string; name: string; capacity: number; minSpend: number; deposit: number; description: string };
 
@@ -19,7 +30,7 @@ function getTables(): Table[] {
   }));
 }
 
-export const toolDefinitions: Anthropic.Tool[] = [
+const BASE_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: "get_table_options",
     description:
@@ -50,9 +61,18 @@ export const toolDefinitions: Anthropic.Tool[] = [
         party_size: { type: "number" },
         table_id: { type: "string", description: "One of the table ids from get_table_options." },
         guest_name: { type: "string" },
-        phone: { type: "string", description: "The guest's phone number, in E.164 format." },
+        // Optional on the web channel — a web guest is no longer asked for
+        // a phone number up front; they only give one if/when they later
+        // choose "text" via set_confirmation_channel. Still always present
+        // for an SMS-channel booking, since claude.ts forces the guest's
+        // own real number onto this field before the tool ever runs.
+        phone: {
+          type: "string",
+          description:
+            "The guest's phone number, in E.164 format. Omit on the web widget unless the guest has already volunteered one.",
+        },
       },
-      required: ["date", "party_size", "table_id", "guest_name", "phone"],
+      required: ["date", "party_size", "table_id", "guest_name"],
     },
   },
   {
@@ -70,7 +90,35 @@ export const toolDefinitions: Anthropic.Tool[] = [
   },
 ];
 
-export async function runTool(name: string, input: any, channelId: string): Promise<any> {
+// Only offered on the web channel — an SMS-channel guest is already texting
+// us from their own real number and keeps getting confirmations the way
+// they always have (see agent/systemPrompt.ts and stripeWebhook.ts's
+// confirmBooking()), so this tool would never have anything to do there.
+// Excluding it entirely (rather than just instructing the model not to use
+// it) means an SMS conversation structurally cannot reach this code path.
+const SET_CONFIRMATION_CHANNEL_TOOL: Anthropic.Tool = {
+  name: "set_confirmation_channel",
+  description:
+    "Records how a WEB guest wants their booking confirmation delivered once payment completes. Call this once, right after start_booking, after the guest has answered whether they want it by text or email (or declined both). For channel 'sms', only offer this at all if the system prompt says texting is currently available, and show the required disclosure sentence to the guest BEFORE they choose — this call validates and normalizes whatever phone number they give, it does not display the disclosure itself. For channel 'email', pass a real email address. For channel 'none', omit contact.",
+  input_schema: {
+    type: "object",
+    properties: {
+      booking_id: { type: "string" },
+      channel: { type: "string", enum: ["sms", "email", "none"] },
+      contact: {
+        type: "string",
+        description: "Phone number (channel=sms) or email address (channel=email). Omit for channel=none.",
+      },
+    },
+    required: ["booking_id", "channel"],
+  },
+};
+
+export function getToolDefinitions(channel: "sms" | "web"): Anthropic.Tool[] {
+  return channel === "web" ? [...BASE_TOOL_DEFINITIONS, SET_CONFIRMATION_CHANNEL_TOOL] : BASE_TOOL_DEFINITIONS;
+}
+
+export async function runTool(name: string, input: any, channelId: string, ip?: string): Promise<any> {
   switch (name) {
     case "get_table_options":
       return { tables: getTables() };
@@ -94,7 +142,15 @@ export async function runTool(name: string, input: any, channelId: string): Prom
     }
 
     case "start_booking": {
-      const { date, party_size, table_id, guest_name, phone } = input;
+      const { date, party_size, table_id, guest_name } = input;
+      // On the web channel, a phone number is no longer collected up
+      // front — the guest only gives one later if/when they choose "text"
+      // for their confirmation (set_confirmation_channel below). Falling
+      // back to the channel id itself here matches the existing "web:<uuid>
+      // placeholder means no real phone yet" convention already relied on
+      // elsewhere (see stripeWebhook.ts's confirmBooking()). An SMS-channel
+      // call always has a real phone — claude.ts forces it onto this field.
+      const phone: string = input.phone || channelId;
       const table = getTables().find((t) => t.id === table_id);
       if (!table) {
         return { success: false, reason: "unknown_table_id" };
@@ -125,6 +181,8 @@ export async function runTool(name: string, input: any, channelId: string): Prom
         payment_url: null,
         stripe_session_id: null,
         channel_id: channelId,
+        confirmation_channel: null,
+        confirmation_contact: null,
       });
 
       const payment = await createPaymentLink({
@@ -156,6 +214,62 @@ export async function runTool(name: string, input: any, channelId: string): Prom
       createFlag(input.phone, input.summary);
       console.log(`\n[NEEDS HUMAN] ${input.phone}: ${input.summary}\n`);
       return { success: true, flagged: true };
+    }
+
+    case "set_confirmation_channel": {
+      const { booking_id, channel, contact } = input;
+      const booking = getBooking(booking_id);
+      if (!booking) {
+        return { success: false, reason: "unknown_booking" };
+      }
+
+      if (channel === "none") {
+        updateBooking(booking_id, { confirmation_channel: "chat_only", confirmation_contact: null });
+        return { success: true, channel: "chat_only" };
+      }
+
+      if (channel === "email") {
+        const email = normalizeEmail(contact);
+        if (!email) return { success: false, reason: "invalid_email" };
+        updateBooking(booking_id, { confirmation_channel: "email", confirmation_contact: email });
+        return { success: true, channel: "email" };
+      }
+
+      if (channel === "sms") {
+        // Defense in depth — the tool's own description tells the model
+        // this is only ever offered when texting is available, but the
+        // system prompt is a suggestion a determined guest could try to
+        // talk around; this check can't be.
+        if (!config.webSmsOptIn) {
+          updateBooking(booking_id, { confirmation_channel: "chat_only", confirmation_contact: null });
+          return { success: false, reason: "sms_not_offered", fallback: "chat_only" };
+        }
+
+        const phone = normalizeUsPhone(contact);
+        if (!phone) {
+          return { success: false, reason: "invalid_phone" };
+        }
+
+        // Both throttles fall back to the same safe outcome — chat-only —
+        // rather than an error the model has to improvise a response to.
+        const ipOk = ip ? tryRecordWebSmsConfirmationByIp(ip) : true;
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const recentForPhone = countRecentSmsConsents(phone, oneDayAgo);
+        if (!ipOk || recentForPhone > 0) {
+          updateBooking(booking_id, { confirmation_channel: "chat_only", confirmation_contact: null });
+          return { success: false, reason: "rate_limited", fallback: "chat_only" };
+        }
+
+        // Recorded only now, at the moment we're actually about to honor
+        // it — never for a declined/throttled/invalid attempt. This row is
+        // both the TCPA-style consent proof and the persisted counter the
+        // 24h-per-phone throttle above reads back.
+        recordSmsConsent({ phone, channelId, disclosureText: SMS_CONFIRMATION_DISCLOSURE });
+        updateBooking(booking_id, { confirmation_channel: "sms", confirmation_contact: phone });
+        return { success: true, channel: "sms" };
+      }
+
+      return { success: false, reason: "invalid_channel" };
     }
 
     default:

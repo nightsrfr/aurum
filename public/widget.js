@@ -18,6 +18,10 @@
  *   launcher button entirely — for an embedding page that wants to open the
  *   chat itself (e.g. from its own "Try it" buttons) via window.AftersetDemo
  *   below, rather than showing a second floating button next to its own UI.
+ * data-top-offset: optional. Pixels of the host page's own fixed header (or
+ *   any other top-of-viewport UI) to keep clear — the panel's max-height
+ *   (desktop) and full-screen height (mobile) both shrink by this amount so
+ *   nothing ever renders underneath it. Defaults to 0.
  *
  * window.AftersetDemo — exposed once this script runs, regardless of
  * data-launcher:
@@ -51,6 +55,13 @@
   var VENUE_NAME = scriptEl.dataset.venueName || "Book a Table";
   var ACCENT = scriptEl.dataset.accentColor || "#c81845";
   var LAUNCHER_MODE = scriptEl.dataset.launcher || "default";
+  // Pixels to keep clear at the top of the viewport — e.g. a host page's own
+  // fixed header — so the panel never renders underneath it. Applied on
+  // both the desktop (bottom-right, max-height-clamped) and mobile
+  // (full-screen) layouts below; see syncPanelHeight() for the third place
+  // this has to be accounted for (the on-screen-keyboard-aware inline
+  // height override).
+  var TOP_OFFSET = Number(scriptEl.dataset.topOffset) || 0;
 
   if (!API_BASE) {
     console.error("[nightsrfr-widget] Missing required data-api-base attribute.");
@@ -158,8 +169,11 @@
     ".launcher.hidden{display:none;}" +
     ".launcher.hasUnread::after{content:'';position:absolute;top:-2px;right:-2px;" +
     "width:12px;height:12px;border-radius:50%;background:#ff3b30;border:2px solid #fff;}" +
+    // max-height is anchored off TOP_OFFSET (default 0) rather than a fixed
+    // guess, so a host page's own fixed header (see data-top-offset in the
+    // doc comment above) always stays uncovered regardless of viewport size.
     ".panel{position:fixed;bottom:88px;right:20px;width:340px;max-width:calc(100vw - 32px);" +
-    "height:460px;max-height:calc(100vh - 120px);background:#fff;border-radius:14px;" +
+    "height:460px;max-height:calc(100vh - " + TOP_OFFSET + "px - 24px);background:#fff;border-radius:14px;" +
     "box-shadow:0 16px 48px rgba(0,0,0,0.3);display:flex;flex-direction:column;overflow:hidden;" +
     "z-index:2147483000;}" +
     ".panel.hidden{display:none;}" +
@@ -198,9 +212,13 @@
     // instead of the keyboard shoving it around. This block is placed last
     // so its rules win the cascade over the base .panel/.header/.footer
     // rules above wherever they overlap (e.g. padding shorthand).
+    // top/height here also respect TOP_OFFSET (see data-top-offset above) —
+    // "height:100%" alone would compute against the full viewport height
+    // regardless of `top`, overflowing past the bottom of the screen by
+    // TOP_OFFSET px, so it's spelled out as an explicit calc() instead.
     "@media (max-width:480px){" +
-    ".panel{left:0;right:0;bottom:0;top:0;width:100%;max-width:100%;" +
-    "height:100%;max-height:none;border-radius:0;}" +
+    ".panel{left:0;right:0;bottom:0;top:" + TOP_OFFSET + "px;width:100%;max-width:100%;" +
+    "height:calc(100vh - " + TOP_OFFSET + "px);max-height:none;border-radius:0;}" +
     ".header{padding-top:calc(14px + env(safe-area-inset-top));}" +
     ".footer{padding-bottom:calc(10px + env(safe-area-inset-bottom));}" +
     "}";
@@ -295,10 +313,33 @@
     }
   }
 
+  // Splits on **bold** pairs and renders each segment (bold or plain)
+  // through renderWithLinks — this is the ONLY other markdown this widget
+  // ever interprets. Everything else (headings, underscores, brackets, a
+  // stray unpaired asterisk) is intentionally left as literal text: since
+  // every segment still goes through document.createTextNode either way,
+  // nothing here is a script-injection risk, it just isn't rendered as
+  // anything special. The system prompt (agent/systemPrompt.ts) is what
+  // actually keeps the model to just these two forms on this channel.
+  function renderWithFormatting(el, text) {
+    // String.prototype.split with a capturing group interleaves the
+    // captured text at odd indices: [plain, bold, plain, bold, ..., plain].
+    var parts = text.split(/\*\*(.+?)\*\*/g);
+    for (var i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) {
+        var strong = document.createElement("strong");
+        renderWithLinks(strong, parts[i]);
+        el.appendChild(strong);
+      } else if (parts[i]) {
+        renderWithLinks(el, parts[i]);
+      }
+    }
+  }
+
   function addMessage(role, text) {
     var el = document.createElement("div");
     el.className = "msg " + role;
-    renderWithLinks(el, text);
+    renderWithFormatting(el, text);
     messagesEl.appendChild(el);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return el;
@@ -326,10 +367,14 @@
   // on-screen keyboard — the panel just gets covered instead. When the
   // visualViewport API is available, pin the panel's actual height to it so
   // the footer (input + send button) always stays above the keyboard.
+  // Subtracting TOP_OFFSET keeps this consistent with the panel's own
+  // `top: TOP_OFFSETpx` CSS rule above — visualViewport.height alone is the
+  // full visible area from y=0, so without this the panel would overflow
+  // past the bottom of the screen by TOP_OFFSET px.
   function syncPanelHeight() {
     if (!isMobile || panel.classList.contains("hidden")) return;
     if (window.visualViewport) {
-      panel.style.height = window.visualViewport.height + "px";
+      panel.style.height = Math.max(window.visualViewport.height - TOP_OFFSET, 0) + "px";
     }
   }
   if (window.visualViewport) {
@@ -437,7 +482,18 @@
 
   sendBtn.addEventListener("click", send);
   input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") send();
+    // e.isComposing is true while an IME (CJK input methods, etc.) is still
+    // resolving the guest's keystrokes into characters — the Enter that
+    // commits that composition isn't the guest asking to send yet, and
+    // sending on it would ship a half-typed word. e.preventDefault() has no
+    // functional effect here (there's no <form> to submit and no other
+    // default Enter behavior on a plain text input) but is cheap insurance
+    // against a host page's own unrelated keydown handling ever double-
+    // firing on the same keypress.
+    if (e.key === "Enter" && !e.isComposing) {
+      e.preventDefault();
+      send();
+    }
   });
 
   // ---- Restore conversation across page loads -----------------------------

@@ -102,6 +102,21 @@ db.exec(`
     created_at TEXT NOT NULL,
     PRIMARY KEY (channel_id, seq)
   );
+
+  -- Consent record for a web guest who opted into a text confirmation (see
+  -- "Demo polish" in docs/audits/aurum-hardening-report.md and
+  -- agent/tools.ts's set_confirmation_channel) — TCPA-style opt-in proof
+  -- (who, when, which conversation, exactly what disclosure they were
+  -- shown), and doubles as the persisted record the 24h-per-phone
+  -- confirmation throttle counts against. One row per confirmation actually
+  -- sent, never a row for a declined/throttled/email choice.
+  CREATE TABLE IF NOT EXISTS sms_consents (
+    id TEXT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    disclosure_text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 // ---- Lightweight migrations for columns added after initial deploy --------
@@ -129,6 +144,16 @@ addColumnIfMissing("tables_config", "deposit INTEGER");
 // created before this column existed have none; the pay page falls back
 // to the table's own current min_spend for those.
 addColumnIfMissing("bookings", "min_spend_cents INTEGER");
+// How this web booking's post-payment confirmation is delivered, and to
+// whom — set by agent/tools.ts's set_confirmation_channel once the guest
+// answers "text or email" (never set for an SMS-channel booking, which
+// keeps texting unconditionally as it always has). Null means "not asked
+// yet / declined both," which resolveConfirmationDelivery() in
+// stripeWebhook.ts treats the same as an explicit "chat_only" — see that
+// file for why a web booking with no consent-flow answer must still default
+// to the safe, no-external-send behavior rather than guessing.
+addColumnIfMissing("bookings", "confirmation_channel TEXT");
+addColumnIfMissing("bookings", "confirmation_contact TEXT");
 
 // ---- One-time seeding --------------------------------------------------
 
@@ -412,6 +437,12 @@ export type Booking = {
   // `phone` is ever changed to hold a guest-supplied callback number instead.
   // Nullable because bookings created before this column existed have none.
   channel_id: string | null;
+  // How (and to whom) the post-payment confirmation is delivered for a WEB
+  // booking — "sms" | "email" | "chat_only" | null (not asked / declined
+  // both). Always null for an SMS-channel booking, which is unaffected by
+  // any of this — see agent/tools.ts's set_confirmation_channel.
+  confirmation_channel: string | null;
+  confirmation_contact: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -430,8 +461,8 @@ export function createBooking(booking: Omit<Booking, "created_at" | "updated_at"
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO bookings
-      (id, phone, guest_name, date, party_size, table_id, amount_cents, min_spend_cents, status, payment_url, stripe_session_id, channel_id, created_at, updated_at)
-     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @min_spend_cents, @status, @payment_url, @stripe_session_id, @channel_id, @now, @now)`
+      (id, phone, guest_name, date, party_size, table_id, amount_cents, min_spend_cents, status, payment_url, stripe_session_id, channel_id, confirmation_channel, confirmation_contact, created_at, updated_at)
+     VALUES (@id, @phone, @guest_name, @date, @party_size, @table_id, @amount_cents, @min_spend_cents, @status, @payment_url, @stripe_session_id, @channel_id, @confirmation_channel, @confirmation_contact, @now, @now)`
   ).run({ ...booking, now });
 }
 
@@ -603,4 +634,24 @@ export function getDailyModelCallCount(): number {
   const day = currentDemoDay();
   const row = db.prepare(`SELECT count FROM model_call_counters WHERE day = ?`).get(day) as { count: number } | undefined;
   return row?.count ?? 0;
+}
+
+// ---- SMS consent (web-originated confirmation opt-in) ---------------------
+// See "Demo polish" in docs/audits/aurum-hardening-report.md and
+// agent/tools.ts's set_confirmation_channel.
+
+/** Persists one real opt-in — called only when a confirmation text is actually about to be sent, never for a declined/throttled attempt. */
+export function recordSmsConsent(params: { phone: string; channelId: string; disclosureText: string }): void {
+  db.prepare(
+    `INSERT INTO sms_consents (id, phone, channel_id, disclosure_text, created_at) VALUES (?, ?, ?, ?, ?)`
+  ).run(randomUUID(), params.phone, params.channelId, params.disclosureText, new Date().toISOString());
+}
+
+/** How many web-originated confirmation texts this phone has already received in the last 24h — the per-phone throttle's own persisted counter. */
+export function countRecentSmsConsents(phone: string, sinceIso: string): number {
+  return (
+    db.prepare(`SELECT COUNT(*) as c FROM sms_consents WHERE phone = ? AND created_at > ?`).get(phone, sinceIso) as {
+      c: number;
+    }
+  ).c;
 }

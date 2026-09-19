@@ -14,6 +14,15 @@ export const DAILY_CAP_MESSAGE = "The demo is resting — text (202) 875-8563 to
 export const RATE_LIMITED_MESSAGE =
   "This demo is getting a lot of visitors from your network right now — try again in a bit, or text (202) 875-8563.";
 
+// The exact disclosure the bot must show BEFORE a web guest chooses to
+// receive their confirmation by text (config.webSmsOptIn gates whether text
+// is even offered at all — see agent/systemPrompt.ts). Recorded verbatim
+// into sms_consents alongside the opt-in itself (agent/tools.ts's
+// set_confirmation_channel) so the exact disclosure text shown is part of
+// the consent record, not just described after the fact.
+export const SMS_CONFIRMATION_DISCLOSURE =
+  "You'll get one text with your confirmation. Msg & data rates may apply. Reply STOP to opt out.";
+
 export function isMessageTooLong(text: string): boolean {
   return text.length > config.maxMessageLength;
 }
@@ -70,6 +79,7 @@ function checkAndIncrement(buckets: Map<string, Bucket>, key: string, limit: num
 
 const ipBuckets = new Map<string, Bucket>();
 const phoneBuckets = new Map<string, Bucket>();
+const webSmsConfirmationIpBuckets = new Map<string, Bucket>();
 
 /** true = this IP may start a new web conversation this hour (an ongoing conversation's later messages never call this). */
 export function tryStartWebConversation(ip: string): boolean {
@@ -81,9 +91,22 @@ export function tryStartSmsConversation(phone: string): boolean {
   return checkAndIncrement(phoneBuckets, phone, config.newSmsConversationsPerPhonePerHour);
 }
 
+/**
+ * true = this IP may trigger a web-originated confirmation-text opt-in this
+ * hour. In-memory (not persisted) — unlike the per-phone 24h throttle
+ * (db.ts's countRecentSmsConsents, which has to survive a restart since 24h
+ * is long relative to this demo's uptime), an hourly IP bucket resetting on
+ * restart is the same acceptable tradeoff every other in-memory guard on
+ * this page already makes.
+ */
+export function tryRecordWebSmsConfirmationByIp(ip: string): boolean {
+  return checkAndIncrement(webSmsConfirmationIpBuckets, ip, config.maxWebSmsConfirmationsPerIpPerHour);
+}
+
 // Exposed for tests only, to reset state between cases without reaching
 // into module-private Maps directly.
 export function __resetRateLimitsForTests(): void {
   ipBuckets.clear();
   phoneBuckets.clear();
+  webSmsConfirmationIpBuckets.clear();
 }

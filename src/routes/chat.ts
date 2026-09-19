@@ -65,7 +65,7 @@ chatRouter.post("/api/chat", async (req, res) => {
   }
 
   try {
-    const reply = await runAgent(channelId, message.trim());
+    const reply = await runAgent(channelId, message.trim(), req.ip);
     res.json({ reply });
   } catch (err) {
     console.error("Widget chat agent error:", err);

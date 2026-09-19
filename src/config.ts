@@ -42,6 +42,29 @@ export const config = {
     return Boolean(this.stripe.secretKey);
   },
 
+  resend: {
+    apiKey: env("RESEND_API_KEY"),
+    emailFrom: env("EMAIL_FROM"),
+  },
+  get resendEnabled() {
+    return Boolean(this.resend.apiKey && this.resend.emailFrom);
+  },
+
+  // Guest-facing SMS confirmations (as opposed to the staff/venue's own
+  // Twilio number receiving inbound texts, which is unaffected by this) are
+  // off by default until the venue's Twilio campaign registration covers
+  // this use — see docs/audits/aurum-hardening-report.md's "Demo polish"
+  // section. When false, the web widget must never offer or mention text as
+  // a confirmation option at all — see agent/systemPrompt.ts and
+  // agent/tools.ts's set_confirmation_channel.
+  webSmsOptIn: env("WEB_SMS_OPT_IN", "false").toLowerCase() === "true",
+  // A web-originated confirmation text is a real, consent-gated send (see
+  // "Demo polish" in the hardening report) — this caps how many one IP can
+  // trigger per hour, on top of the per-phone 24h cap enforced from the
+  // persisted sms_consents table (agent/tools.ts). Deliberately hardcoded,
+  // not env-configurable, like every other fixed abuse-guard number below.
+  maxWebSmsConfirmationsPerIpPerHour: 3,
+
   venueName: env("VENUE_NAME", "The Venue"),
   maxTablesPerTierPerNight: Number(env("MAX_TABLES_PER_TIER_PER_NIGHT", "3")),
 
