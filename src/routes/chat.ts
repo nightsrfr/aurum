@@ -8,19 +8,29 @@ import { isMessageTooLong, tryStartWebConversation, TOO_LONG_MESSAGE, RATE_LIMIT
 
 export const chatRouter = Router();
 
-// Scoped to just this router's routes (not applied globally in server.ts)
-// so the Twilio/Stripe webhooks — server-to-server calls with no Origin
-// header, unaffected by CORS either way — are never accidentally coupled
-// to this allowlist. Browsers preflight cross-origin requests against
-// whatever origin list this reports; a non-browser client (curl, a
-// script) ignores CORS entirely, so this is a defense against a hostile
-// third-party site quietly draining the demo's daily model-call budget
-// through a visitor's own browser, not a hard security boundary on its own.
+// Mounted on the "/api/chat" path prefix (covering /api/chat,
+// /api/chat/history, and /api/chat/stream) and nothing else. The path is
+// load-bearing: server.ts mounts this router with a bare app.use(), so a
+// path-less chatRouter.use(cors(...)) would run for every request that
+// reaches this router — including /admin, whose router is mounted after
+// this one. A disallowed origin makes the callback below pass an Error,
+// which Express turns into a server-side 500 before the browser's CORS
+// policy is ever consulted, and browsers send an Origin header even on
+// same-origin requests for every method except GET/HEAD. Unscoped, that
+// rejected POST /admin/login from the service's own domain.
+//
+// Browsers preflight cross-origin requests against whatever origin list
+// this reports; a non-browser client (curl, a script) ignores CORS
+// entirely, so this is a defense against a hostile third-party site
+// quietly draining the demo's daily model-call budget through a visitor's
+// own browser, not a hard security boundary on its own.
 chatRouter.use(
+  "/api/chat",
   cors({
     origin(origin, callback) {
-      // No Origin header at all (curl, server-to-server, same-origin) —
-      // let it through; this isn't the layer that's supposed to stop that.
+      // No Origin header at all (curl, server-to-server, or a same-origin
+      // GET/HEAD) — let it through; this isn't the layer that's supposed
+      // to stop that.
       if (!origin) return callback(null, true);
       if (config.allowedChatOrigins.includes(origin)) return callback(null, true);
       if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {

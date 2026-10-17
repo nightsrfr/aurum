@@ -10,12 +10,17 @@ import { adminRouter } from "./routes/admin.js";
 const app = express();
 
 // No global CORS here — chatRouter (routes/chat.ts) applies its own,
-// scoped to only /api/chat, /api/chat/history, and /api/chat/stream, and
-// restricted to the real marketing-site origins plus localhost. Every
-// other route here is either same-origin navigation (/admin, /pay, /demo)
-// or a server-to-server webhook (Twilio/Stripe never send a browser
-// Origin header, so CORS is meaningless for them either way) — a global
-// open policy had no reason to cover those too.
+// restricted to the real marketing-site origins plus localhost and mounted
+// on the "/api/chat" path prefix, so it covers only /api/chat,
+// /api/chat/history, and /api/chat/stream. That path prefix is what keeps
+// it off every other route: chatRouter is mounted here with a bare
+// app.use(), so without it the allowlist would run for every later
+// router too (adminRouter included). It must stay scoped, because a
+// disallowed Origin is a server-side 500, not a browser-side block, and
+// browsers do send Origin on same-origin POSTs — /admin/login's form post
+// carries this service's own origin, which isn't on the list. The other
+// routes are same-origin pages (/admin, /pay, /demo) or server-to-server
+// webhooks (Twilio/Stripe send no Origin header) and need no CORS policy.
 
 // Serves widget.js and the demo.html test page as static files.
 app.use(express.static("public"));

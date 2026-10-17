@@ -17,6 +17,9 @@ async function startApp() {
   const app = express();
   app.use(express.json());
   app.use(chatRouter);
+  // Stand-in for a router mounted after chatRouter in server.ts (adminRouter
+  // is) — proves the chat CORS allowlist doesn't leak onto it.
+  app.post("/admin/login", (_req, res) => res.status(204).end());
   const server = await new Promise<http.Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
@@ -74,6 +77,22 @@ test("CORS: localhost is allowed for local development", async () => {
       headers: { Origin: "http://localhost:5173" },
     });
     assert.equal(res.headers.get("access-control-allow-origin"), "http://localhost:5173");
+  } finally {
+    server.close();
+  }
+});
+
+test("CORS: the chat allowlist does not apply outside /api/chat — a same-origin POST to a later router (e.g. /admin/login) is not rejected", async () => {
+  const { server, base } = await startApp();
+  try {
+    // Browsers send Origin on same-origin POSTs; this service's own origin
+    // is deliberately not in allowedChatOrigins.
+    const res = await fetch(`${base}/admin/login`, {
+      method: "POST",
+      headers: { Origin: "https://aurum-demo.onrender.com", "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "x" }),
+    });
+    assert.equal(res.status, 204);
   } finally {
     server.close();
   }
